@@ -1,3 +1,5 @@
+// +build trace
+
 /*
    Copyright 2013 Tamás Gulácsi
 
@@ -13,7 +15,6 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 */
-// +build trace
 
 package oracle
 
