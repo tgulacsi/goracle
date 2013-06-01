@@ -34,7 +34,7 @@ import "C"
 
 import (
 	"fmt"
-	"log"
+	//"log"
 	"unsafe"
 )
 
@@ -48,6 +48,7 @@ func cursorVar_Initialize(v *Variable, cur *Cursor) error {
 
 	v.connection = cur.connection
 	v.cursors = make([]*Cursor, v.allocatedElements)
+	debug("cursorVar_Initialize conn=%x ae=%d typ.Name=%s\n", v.connection, v.allocatedElements, v.typ.Name)
 	for i := uint(0); i < v.allocatedElements; i++ {
 		tempCursor = v.connection.NewCursor()
 		if err = tempCursor.allocateHandle(); err != nil {
@@ -56,8 +57,8 @@ func cursorVar_Initialize(v *Variable, cur *Cursor) error {
 		j = int(i * v.typ.size)
 		C.cursorVar_setHandle(unsafe.Pointer(&v.dataBytes[j]),
 			tempCursor.handle)
-		log.Printf("set position %d(%d) in dataBytes to %x", i, j,
-			v.dataBytes[j:j+int(C.sof_OCIStmtp)])
+		debug("set position %d(%d) in dataBytes to %x [%s]", i, j,
+			v.dataBytes[j:j+int(v.typ.size)], v.typ.size)
 	}
 
 	return nil
@@ -112,6 +113,7 @@ func cursorVar_GetValue(v *Variable, pos uint) (interface{}, error) {
 
 func init() {
 	CursorVarType = &VariableType{
+		Name:        "cursor",
 		initialize:  cursorVar_Initialize,
 		finalize:    cursorVar_Finalize,
 		setValue:    cursorVar_SetValue,

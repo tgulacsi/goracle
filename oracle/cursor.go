@@ -584,7 +584,7 @@ func (cur *Cursor) setBindVariableHelper(numElements, // number of elements to c
 	isValueVar = isVariable(value) //FIXME
 
 	// handle case where variable is already bound
-	// debug("origVar=%s value=%s (%T)", origVar, value, value)
+	debug("origVar=%#v value=%#v (%T)", origVar, value, value)
 	if origVar != nil {
 
 		// if the value is a variable object, rebind it if necessary
@@ -645,7 +645,8 @@ func (cur *Cursor) setBindVariableHelper(numElements, // number of elements to c
 		if isValueVar && value != nil && value.(*Variable) != nil {
 			debug("A")
 			newVar = value.(*Variable)
-			debug("newVar=%v %T", newVar, newVar.typ.Name)
+			debug("newVar=%#v typ.Name=%s", newVar, string(newVar.typ.Name))
+			debug("newVar.typ=%#v", newVar.typ)
 			newVar.boundPos = 0
 			newVar.boundName = ""
 
@@ -658,8 +659,16 @@ func (cur *Cursor) setBindVariableHelper(numElements, // number of elements to c
 			if err = newVar.SetValue(arrayPos, value); err != nil {
 				return
 			}
+			debug("%v.SetValue(%d, %v)", newVar, arrayPos, value)
 		}
 
+		if newVar.typ.Name == "" {
+			log.Fatalf("uninitialized type for %s", newVar)
+		}
+	} else {
+		if origVar.typ.Name == "" {
+			log.Fatalf("uninitialized type for %s", origVar)
+		}
 	}
 
 	return
