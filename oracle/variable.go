@@ -160,7 +160,7 @@ func (t *VariableType) NewVariable(cur *Cursor, numElements uint, size uint) (*V
 }
 
 func (t *VariableType) String() string {
-	return fmt.Sprintf("<%s %d var?%s char?%s>", t.Name, t.oracleType,
+	return fmt.Sprintf("<%s %d var?%t char?%t>", t.Name, t.oracleType,
 		t.isVariableLength, t.isCharData)
 }
 
