@@ -44,6 +44,7 @@ import "C"
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"unsafe"
@@ -145,7 +146,10 @@ func NewEnvironment() (*Environment, error) {
 
 func ociHandleAlloc(parent unsafe.Pointer, typ C.ub4, dst *unsafe.Pointer, at string) error {
 	// var vsize C.ub4
-	return checkStatus(C.OCIHandleAlloc(parent, dst, typ, C.size_t(0), nil), false)
+	if err := checkStatus(C.OCIHandleAlloc(parent, dst, typ, C.size_t(0), nil), false); err != nil {
+		return errors.New(at + ": " + err.Error())
+	}
+	return nil
 }
 
 func (env *Environment) AttrSet(parent unsafe.Pointer, parentTyp C.ub4,

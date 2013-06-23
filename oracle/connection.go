@@ -21,12 +21,25 @@ package oracle
 
 #include <stdlib.h>
 #include <oci.h>
+#include <string.h>
+#include <xa.h>
+
+const int sizeof_XID = sizeof(XID);
+void setXID(XID *xid, int formatId, char *transactionId, int tIdLen, char *branchId, int bIdLen) {
+    xid->formatID = formatId;
+    xid->gtrid_length = tIdLen;
+    xid->bqual_length = bIdLen;
+    if (tIdLen > 0)
+        strncpy(xid->data, transactionId, tIdLen);
+    if (bIdLen > 0)
+        strncpy(&xid->data[tIdLen], branchId, bIdLen);
+}
 */
 import "C"
 
 import (
+	"errors"
 	"fmt"
-	// "log"
 	"strings"
 	"sync"
 	"unsafe"
@@ -306,88 +319,79 @@ func (conn *Connection) Commit() error {
 	return nil
 }
 
-/*
 // Begin begins a new transaction on the connection.
-func (conn *Connection) Begin() error {
-    unsigned transactionIdLength, branchIdLength;
-    const char *transactionId, *branchId;
-    OCITrans *transactionHandle;
-    int formatId;
-    sword status;
-    XID xid;
+func (conn *Connection) Begin(formatId int, transactionId, branchId string) error {
+	var transactionHandle *C.OCITrans
+	var xid C.XID
 
-    // parse the arguments
-    formatId = -1;
-    transactionIdLength = branchIdLength = 0;
-    if (!PyArg_ParseTuple(args, "|is#s#", &formatId, &transactionId,
-            &transactionIdLength,  &branchId, &branchIdLength))
-        return NULL;
-    if (transactionIdLength > MAXGTRIDSIZE) {
-        PyErr_SetString(PyExc_ValueError, "transaction id too large");
-        return NULL;
-    }
-    if (branchIdLength > MAXBQUALSIZE) {
-        PyErr_SetString(PyExc_ValueError, "branch id too large");
-        return NULL;
-    }
+	// parse the arguments
+	formatId = -1
+	if len(transactionId) > C.MAXGTRIDSIZE {
+		return errors.New("transaction id too large")
+	}
+	if len(branchId) > C.MAXBQUALSIZE {
+		return errors.New("branch id too large")
+	}
 
-    // make sure we are actually connected
-    if (Connection_IsConnected(self) < 0)
-        return NULL;
+	// make sure we are actually connected
+	if !conn.IsConnected() {
+		return nil
+	}
 
-    // determine if a transaction handle was previously allocated
-    status = OCIAttrGet(self->handle, OCI_HTYPE_SVCCTX,
-            (dvoid**) &transactionHandle, 0, OCI_ATTR_TRANS,
-            self->environment->errorHandle);
-    if (Environment_CheckForError(self->environment, status,
-            "Connection_Begin(): find existing transaction handle") < 0)
-        return NULL;
+	// determine if a transaction handle was previously allocated
+	_, err := conn.environment.AttrGet(
+		unsafe.Pointer(conn.handle), C.OCI_HTYPE_SVCCTX,
+		C.OCI_ATTR_TRANS, unsafe.Pointer(&transactionHandle),
+		"Connection.Begin(): find existing transaction handle")
+	if err != nil {
+		return err
+	}
 
-    // create a new transaction handle, if necessary
-    if (!transactionHandle) {
-        status = OCIHandleAlloc(self->environment->handle,
-                (dvoid**) &transactionHandle, OCI_HTYPE_TRANS, 0, 0);
-        if (Environment_CheckForError(self->environment, status,
-                "Connection_Begin(): allocate transaction handle") < 0)
-            return NULL;
-    }
+	// create a new transaction handle, if necessary
+	if transactionHandle == nil {
+		if err = ociHandleAlloc(unsafe.Pointer(conn.environment.handle),
+			C.OCI_HTYPE_TRANS,
+			(*unsafe.Pointer)(unsafe.Pointer(&transactionHandle)),
+			"Connection.Begin"); err != nil {
+			return errors.New("Connection.Begin(): allocate transaction handle: " +
+				err.Error())
+		}
+	}
 
-    // set the XID for the transaction, if applicable
-    if (formatId != -1) {
-        xid.formatID = formatId;
-        xid.gtrid_length = transactionIdLength;
-        xid.bqual_length = branchIdLength;
-        if (transactionIdLength > 0)
-            strncpy(xid.data, transactionId, transactionIdLength);
-        if (branchIdLength > 0)
-            strncpy(&xid.data[transactionIdLength], branchId, branchIdLength);
-        OCIAttrSet(transactionHandle, OCI_HTYPE_TRANS, &xid, sizeof(XID),
-                OCI_ATTR_XID, self->environment->errorHandle);
-        if (Environment_CheckForError(self->environment, status,
-                "Connection_Begin(): set XID") < 0)
-            return NULL;
-    }
+	// set the XID for the transaction, if applicable
+	if formatId != -1 {
+		tId := []byte(transactionId)
+		bId := []byte(branchId)
+		C.setXID(&xid, C.int(formatId),
+			(*C.char)(unsafe.Pointer(&tId[0])), C.int(len(tId)),
+			(*C.char)(unsafe.Pointer(&bId[0])), C.int(len(bId)))
+		if err = conn.environment.AttrSet(
+			unsafe.Pointer(transactionHandle), C.OCI_ATTR_XID,
+			C.OCI_HTYPE_TRANS, unsafe.Pointer(&xid), C.sizeof_XID); err != nil {
+			return errors.New("Connection.Begin(): set XID: " + err.Error())
+		}
+	}
 
-    // associate the transaction with the connection
-    OCIAttrSet(self->handle, OCI_HTYPE_SVCCTX, transactionHandle, 0,
-            OCI_ATTR_TRANS, self->environment->errorHandle);
-    if (Environment_CheckForError(self->environment, status,
-            "Connection_Begin(): associate transaction") < 0)
-        return NULL;
+	// associate the transaction with the connection
+	if err = conn.environment.AttrSet(
+		unsafe.Pointer(conn.handle), C.OCI_HTYPE_SVCCTX,
+		C.OCI_ATTR_TRANS, unsafe.Pointer(transactionHandle), 0); err != nil {
+		return errors.New("Connection.Begin(): associate transaction: " + err.Error())
+	}
 
-    // start the transaction
-    Py_BEGIN_ALLOW_THREADS
-    status = OCITransStart(self->handle, self->environment->errorHandle, 0,
-            OCI_TRANS_NEW);
-    Py_END_ALLOW_THREADS
-    if (Environment_CheckForError(self->environment, status,
-            "Connection_Begin(): start transaction") < 0)
-        return NULL;
+	// start the transaction
+	//Py_BEGIN_ALLOW_THREADS
+	conn.srvMtx.Lock()
+	defer conn.srvMtx.Unlock()
+	if err = conn.environment.CheckStatus(
+		C.OCITransStart(conn.handle, conn.environment.errorHandle, 0, C.OCI_TRANS_NEW),
+		"start transaction"); err != nil {
+		return errors.New("Connection.Begin(): start transaction: " + err.Error())
+	}
 
-    Py_INCREF(Py_None);
-    return Py_None;
+	//Py_END_ALLOW_THREADS
+	return nil
 }
-*/
 
 // Prepare commits (if there is anything, TWO-PAHSE) the transaction on the connection.
 func (conn *Connection) Prepare() (bool, error) {

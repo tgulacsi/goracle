@@ -69,13 +69,14 @@ type tx struct {
 }
 
 // begins a transaction
-func (c conn) Begin() (driver.Tx, error) {
+func (c conn) Begin() (tx driver.Tx, err error) {
 	if !c.cx.IsConnected() {
-		if err := c.cx.Connect(0, false); err != nil {
-			return tx{cx: nil}, err
+		if err = c.cx.Connect(0, false); err != nil {
+			return
 		}
 	}
-	return tx{cx: c.cx}, nil
+	tx = tx{cx: c.cx}
+	return
 }
 
 // commits currently opened transaction
