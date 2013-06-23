@@ -80,15 +80,18 @@ func (c conn) Begin() (driver.Tx, error) {
 
 // commits currently opened transaction
 func (t tx) Commit() error {
-	if t.cx != nil && t.cx.IsConnected() {
-		return t.cx.NewCursor().Execute("COMMIT", nil, nil)
+	if t.cx != nil {
+		return t.cx.Commit()
 	}
 	return nil
 }
 
 // rolls back current transaction
 func (t tx) Rollback() error {
-	return t.cx.Rollback()
+	if t.cx != nil {
+		return t.cx.Rollback()
+	}
+	return nil
 }
 
 // closes statement

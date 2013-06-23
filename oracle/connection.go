@@ -285,6 +285,136 @@ func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string
 	return nil
 }
 
+// Commit commits the transaction on the connection.
+func (conn *Connection) Commit() error {
+	// make sure we are actually connected
+	if !conn.IsConnected() {
+		return nil //?
+	}
+
+	conn.srvMtx.Lock()
+	defer conn.srvMtx.Unlock()
+	// perform the commit
+	//Py_BEGIN_ALLOW_THREADS
+	if err := conn.environment.CheckStatus(
+		C.OCITransCommit(conn.handle, conn.environment.errorHandle,
+			C.ub4(conn.commitMode)), "Commit"); err != nil {
+		return err
+	}
+	conn.commitMode = C.OCI_DEFAULT
+	//Py_END_ALLOW_THREADS
+	return nil
+}
+
+/*
+// Begin begins a new transaction on the connection.
+func (conn *Connection) Begin() error {
+    unsigned transactionIdLength, branchIdLength;
+    const char *transactionId, *branchId;
+    OCITrans *transactionHandle;
+    int formatId;
+    sword status;
+    XID xid;
+
+    // parse the arguments
+    formatId = -1;
+    transactionIdLength = branchIdLength = 0;
+    if (!PyArg_ParseTuple(args, "|is#s#", &formatId, &transactionId,
+            &transactionIdLength,  &branchId, &branchIdLength))
+        return NULL;
+    if (transactionIdLength > MAXGTRIDSIZE) {
+        PyErr_SetString(PyExc_ValueError, "transaction id too large");
+        return NULL;
+    }
+    if (branchIdLength > MAXBQUALSIZE) {
+        PyErr_SetString(PyExc_ValueError, "branch id too large");
+        return NULL;
+    }
+
+    // make sure we are actually connected
+    if (Connection_IsConnected(self) < 0)
+        return NULL;
+
+    // determine if a transaction handle was previously allocated
+    status = OCIAttrGet(self->handle, OCI_HTYPE_SVCCTX,
+            (dvoid**) &transactionHandle, 0, OCI_ATTR_TRANS,
+            self->environment->errorHandle);
+    if (Environment_CheckForError(self->environment, status,
+            "Connection_Begin(): find existing transaction handle") < 0)
+        return NULL;
+
+    // create a new transaction handle, if necessary
+    if (!transactionHandle) {
+        status = OCIHandleAlloc(self->environment->handle,
+                (dvoid**) &transactionHandle, OCI_HTYPE_TRANS, 0, 0);
+        if (Environment_CheckForError(self->environment, status,
+                "Connection_Begin(): allocate transaction handle") < 0)
+            return NULL;
+    }
+
+    // set the XID for the transaction, if applicable
+    if (formatId != -1) {
+        xid.formatID = formatId;
+        xid.gtrid_length = transactionIdLength;
+        xid.bqual_length = branchIdLength;
+        if (transactionIdLength > 0)
+            strncpy(xid.data, transactionId, transactionIdLength);
+        if (branchIdLength > 0)
+            strncpy(&xid.data[transactionIdLength], branchId, branchIdLength);
+        OCIAttrSet(transactionHandle, OCI_HTYPE_TRANS, &xid, sizeof(XID),
+                OCI_ATTR_XID, self->environment->errorHandle);
+        if (Environment_CheckForError(self->environment, status,
+                "Connection_Begin(): set XID") < 0)
+            return NULL;
+    }
+
+    // associate the transaction with the connection
+    OCIAttrSet(self->handle, OCI_HTYPE_SVCCTX, transactionHandle, 0,
+            OCI_ATTR_TRANS, self->environment->errorHandle);
+    if (Environment_CheckForError(self->environment, status,
+            "Connection_Begin(): associate transaction") < 0)
+        return NULL;
+
+    // start the transaction
+    Py_BEGIN_ALLOW_THREADS
+    status = OCITransStart(self->handle, self->environment->errorHandle, 0,
+            OCI_TRANS_NEW);
+    Py_END_ALLOW_THREADS
+    if (Environment_CheckForError(self->environment, status,
+            "Connection_Begin(): start transaction") < 0)
+        return NULL;
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+*/
+
+// Prepare commits (if there is anything, TWO-PAHSE) the transaction on the connection.
+func (conn *Connection) Prepare() (bool, error) {
+	// make sure we are actually connected
+	if !conn.IsConnected() {
+		return false, nil //?
+	}
+
+	conn.srvMtx.Lock()
+	defer conn.srvMtx.Unlock()
+	// perform the prepare
+	//Py_BEGIN_ALLOW_THREADS
+	status := C.OCITransPrepare(conn.handle, conn.environment.errorHandle, C.OCI_DEFAULT)
+	// if nothing available to prepare, return False in order to allow for
+	// avoiding the call to commit() which will fail with ORA-24756
+	// (transaction does not exist)
+	if status == C.OCI_SUCCESS_WITH_INFO {
+		return false, nil
+	}
+	if err := conn.environment.CheckStatus(status, "Prepare"); err != nil {
+		return false, err
+	}
+	conn.commitMode = C.OCI_TRANS_TWOPHASE
+	//Py_END_ALLOW_THREADS
+	return true, nil
+}
+
 func (conn *Connection) Rollback() error {
 	conn.srvMtx.Lock()
 	defer conn.srvMtx.Unlock()
