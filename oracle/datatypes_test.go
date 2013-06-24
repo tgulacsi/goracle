@@ -379,6 +379,8 @@ END;`
 }
 
 func TestCursorOut(t *testing.T) {
+	IsDebug = true
+
 	conn := getConnection(t)
 	if !conn.IsConnected() {
 		t.FailNow()
@@ -405,7 +407,7 @@ END;`
 		t.Errorf("error executing `%s`: %s", qry, err)
 		t.FailNow()
 	}
-	outVal, err := out.GetValue(1)
+	outVal, err := out.GetValue(0)
 	if err != nil {
 		t.Errorf("cannor get out value: %s", err)
 		t.FailNow()

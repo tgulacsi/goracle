@@ -89,7 +89,7 @@ func (cur *Cursor) freeHandle() error {
 	if cur.handle == nil {
 		return nil
 	}
-	// debug("freeing cursor handle %v", cur.handle)
+	//debug("freeing cursor handle %v", cur.handle)
 	if cur.isOwned {
 		if CTrace {
 			ctrace("OCIHandleFree", cur.handle, "htype_stmt")
@@ -229,7 +229,7 @@ func (cur *Cursor) performDefine() error {
 
 	// determine number of items in select-list
 	if CTrace {
-		ctrace("OCIAttrGet", cur.handle, "HTYPE_STMT", &numParams, &x,
+		ctrace("performDefine.OCIAttrGet", cur.handle, "HTYPE_STMT", &numParams, &x,
 			"PARAM_COUNT", cur.environment.errorHandle)
 	}
 	if err := cur.environment.CheckStatus(
@@ -309,7 +309,7 @@ func (cur Cursor) GetRowCount() int {
 func (cur *Cursor) getErrorOffset() int {
 	var offset, x C.ub4
 	if CTrace {
-		ctrace("OCIAttrGet", cur.handle, "HTYPE_STMT", &offset, &x,
+		ctrace("getErrorOffset.OCIAttrGet", cur.handle, "HTYPE_STMT", &offset, &x,
 			"ATTR_PARSE_ERROR_OFFSET", cur.environment.errorHandle)
 	}
 	C.OCIAttrGet(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
@@ -340,7 +340,7 @@ func (cur *Cursor) internalExecute(numIters uint) error {
 	debug("%p.StmtExecute(%s, mode=%d) in internalExecute", cur,
 		cur.statement, mode)
 	if CTrace {
-		ctrace("OCIStmtExecute", cur.connection.handle, cur.handle,
+		ctrace("internalExecute.OCIStmtExecute", cur.connection.handle, cur.handle,
 			cur.environment.errorHandle, numIters, 0, nil, nil, mode)
 	}
 	if err := cur.environment.CheckStatus(
@@ -361,7 +361,8 @@ func (cur *Cursor) getStatementType() error {
 	var statementType C.ub2
 	var vsize C.ub4
 	if CTrace {
-		ctrace("OCIAttrGet", cur.handle, "HTYPE_STMT", &statementType, &vsize,
+		ctrace("getStatementType.OCIAttrGet",
+			cur.handle, "HTYPE_STMT", &statementType, &vsize,
 			"ATTR_STMT_TYPE", cur.environment.errorHandle)
 	}
 	if err := cur.environment.CheckStatus(
@@ -372,6 +373,9 @@ func (cur *Cursor) getStatementType() error {
 		return err
 	}
 	cur.statementType = int(statementType)
+	if CTrace {
+		ctrace("statement type is ", cur.statementType)
+	}
 	if cur.fetchVariables != nil {
 		cur.fetchVariables = nil
 	}
@@ -903,7 +907,7 @@ func (cur *Cursor) internalPrepare(statement string, statementTag string) error 
 	debug(`%p.Prepare2 for "%s" [%x]`, cur, cur.statement, cur.statementTag)
 	// Py_BEGIN_ALLOW_THREADS
 	if CTrace {
-		ctrace("OCIStmtPrepare2", cur.connection.handle, &cur.handle, cur.environment.errorHandle,
+		ctrace("internalPrepare.OCIStmtPrepare2", cur.connection.handle, &cur.handle, cur.environment.errorHandle,
 			string(bytes.Replace(cur.statement, []byte{'\n'}, []byte("\\n"), -1)),
 			len(cur.statement), cur.statementTag, len(cur.statementTag),
 			"NTV_SYNTAX", "DEFAULT")
@@ -921,6 +925,9 @@ func (cur *Cursor) internalPrepare(statement string, statementTag string) error 
 		// resulting handle is still invalid
 		cur.handle = nil
 		return err
+	}
+	if CTrace {
+		ctrace("internalPrepare done, cur.handle=%x", cur.handle)
 	}
 	// debug("prepared")
 
@@ -1228,7 +1235,7 @@ func (cur *Cursor) Execute(statement string,
 	if err = cur.performBind(); err != nil {
 		return err
 	}
-	// debug("bind done, executing statement")
+	debug("bind done, executing statement listArgs=%v", listArgs)
 
 	// execute the statement
 	isQuery := cur.statementType == C.OCI_STMT_SELECT

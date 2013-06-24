@@ -28,14 +28,14 @@ limitations under the License.
 const unsigned int sof_OCIStmtp = sizeof(OCIStmt*);
 
 static void cursorVarsetHandle(void *data, OCIStmt *handle) {
-    memcpy(data, handle, sof_OCIStmtp);
+    memcpy(data, &handle, sof_OCIStmtp);
 }
 */
 import "C"
 
 import (
+	"errors"
 	"fmt"
-	//"log"
 	"unsafe"
 )
 
@@ -56,6 +56,7 @@ func cursorVarInitialize(v *Variable, cur *Cursor) error {
 		if err = tempCursor.allocateHandle(); err != nil {
 			return err
 		}
+		v.cursors[int(i)] = tempCursor
 		j = int(i * v.typ.size)
 		C.cursorVarsetHandle(unsafe.Pointer(&v.dataBytes[j]),
 			tempCursor.handle)
@@ -104,10 +105,17 @@ func cursorVarSetValue(v *Variable, pos uint, value interface{}) error {
 
 // Set the value of the variable.
 func cursorVarGetValue(v *Variable, pos uint) (interface{}, error) {
+	if v == nil {
+		return nil, errors.New("variable is nil")
+	}
+	if v.cursors == nil {
+		return nil, errors.New("v.cursors is nil")
+	}
 	if uint(len(v.cursors)) <= pos {
 		return nil, fmt.Errorf("can't get cursor at pos %d from array of %d length",
 			pos, len(v.cursors))
 	}
+	debug("cursorVarGetValue(%v, %d): v.cursors=%v", v, pos, v.cursors)
 	cur := v.cursors[pos]
 	cur.statementType = -1
 	return cur, nil
