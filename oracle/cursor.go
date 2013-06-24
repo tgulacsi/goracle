@@ -1,19 +1,20 @@
-/*
-   Copyright 2013 Tamás Gulácsi
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-     http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
 package oracle
+
+/*
+Copyright 2013 Tamás Gulácsi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 /*
 #cgo CFLAGS: -I/usr/include/oracle/11.2/client64
@@ -43,7 +44,9 @@ import (
 // debug("bindInfo_elementSize=%d", C.bindInfo_elementSize)
 // }
 
+// Cursor holds the handles for a cursor
 type Cursor struct {
+	// private or unexported fields
 	handle                                      *C.OCIStmt
 	connection                                  *Connection
 	environment                                 *Environment
@@ -59,16 +62,20 @@ type Cursor struct {
 	numbersAsStrings, isDML, isOpen, isOwned    bool
 }
 
+//DefaultArraySize is the default array (PL/SQL) size
 var DefaultArraySize uint = 50
 var (
-	CursorIsClosed      = errors.New("cursor is closed")
+	//CursorIsClosed prints cursor is closed
+	CursorIsClosed = errors.New("cursor is closed")
+	//QueriesNotSupported prints queries not supported
 	QueriesNotSupported = errors.New("queries not supported: results undefined")
-	ListIsEmpty         = errors.New("list is empty")
+	//ListIsEmpty prints list is empty
+	ListIsEmpty = errors.New("list is empty")
 )
 
 //statement // statementTag // rowFactory // inputTypeHandler // outputTypeHandler
 
-//   Allocate a new handle.
+// allocateHandle allocates a new handle.
 func (cur *Cursor) allocateHandle() error {
 	cur.isOwned = true
 	return ociHandleAlloc(unsafe.Pointer(cur.environment.handle),
@@ -77,7 +84,7 @@ func (cur *Cursor) allocateHandle() error {
 		"allocate statement handle")
 }
 
-//   Free the handle which may be reallocated if necessary.
+//freeHandle frees the handle which may be reallocated if necessary.
 func (cur *Cursor) freeHandle() error {
 	if cur.handle == nil {
 		return nil
@@ -105,6 +112,7 @@ func (cur *Cursor) freeHandle() error {
 	return nil
 }
 
+//FromOraText converts from C.OraText to a string
 func FromOraText(textp *C.OraText, length int) string {
 	/*
 	   var theGoSlice []TheCType
@@ -118,6 +126,7 @@ func FromOraText(textp *C.OraText, length int) string {
 	return string(C.GoBytes(unsafe.Pointer(textp), C.int(C.sizeof_OraText*length)))
 }
 
+//IsOpen checks whether the cursor is open
 func (cur *Cursor) IsOpen() bool {
 	if !cur.isOpen {
 		return false
@@ -125,7 +134,7 @@ func (cur *Cursor) IsOpen() bool {
 	return cur.connection.IsConnected()
 }
 
-// Creates new cursor
+//NewCursor creates a new cursor
 func NewCursor(conn *Connection) *Cursor {
 	return &Cursor{connection: conn, environment: conn.environment,
 		arraySize: DefaultArraySize, fetchArraySize: DefaultArraySize,
@@ -133,11 +142,12 @@ func NewCursor(conn *Connection) *Cursor {
 		isOpen: true}
 }
 
+//String implements Stringer on Cursor
 func (cur Cursor) String() string {
-	return fmt.Sprintf("<goracle.Cursor on %s>", cur.connection)
+	return fmt.Sprintf("<goracle.Cursor %x on %s>", cur.handle, cur.connection)
 }
 
-//   Return a list of bind variable names. At this point the cursor must have
+//getBindNames returns a list of bind variable names. At this point the cursor must have
 // already been prepared.
 func (cur *Cursor) getBindNames() (names []string, err error) {
 	// ensure that a statement has already been prepared
@@ -155,6 +165,7 @@ func (cur *Cursor) getBindNames() (names []string, err error) {
 	return names, err
 }
 
+// getBindInfo returns the bind information on the cursor
 func (cur *Cursor) getBindInfo(numElements int) ([]string, error) {
 	var foundElements C.sb4
 
@@ -210,11 +221,11 @@ func (cur *Cursor) getBindInfo(numElements int) ([]string, error) {
 	return names, nil
 }
 
-// Perform the defines for the cursor. At this point it is assumed that the
-// statement being executed is in fact a query.
+// performDefine performs the defines for the cursor.
+// At this point it is assumed that the statement being executed is in fact a query.
 func (cur *Cursor) performDefine() error {
 	var numParams uint
-	var x C.ub4 = 0
+	var x = C.ub4(0)
 
 	// determine number of items in select-list
 	if CTrace {
@@ -254,7 +265,7 @@ func (cur *Cursor) performDefine() error {
 	return nil
 }
 
-// Set the rowcount variable.
+// setRowCount sets the rowcount variable.
 func (cur *Cursor) setRowCount() error {
 	var rowCount, x C.ub4
 
@@ -284,7 +295,7 @@ func (cur *Cursor) setRowCount() error {
 	return nil
 }
 
-// returns the rowcount of the statement (0 for select, rows affected for DML)
+// GetRowCount returns the rowcount of the statement (0 for select, rows affected for DML)
 func (cur Cursor) GetRowCount() int {
 	return cur.rowCount
 }
@@ -294,7 +305,7 @@ func (cur Cursor) GetRowCount() int {
 // 	return cur.bindVarsArr, cur.bindVarsMap
 // }
 
-// Get the error offset on the error object, if applicable.
+// getErrorOffset gets the error offset on the error object, if applicable.
 func (cur *Cursor) getErrorOffset() int {
 	var offset, x C.ub4
 	if CTrace {
@@ -307,14 +318,15 @@ func (cur *Cursor) getErrorOffset() int {
 	return int(offset)
 }
 
+// setErrorOffset sets the error offset (if applicable)
 func (cur *Cursor) setErrorOffset(err error) {
 	if x, ok := err.(*Error); ok {
 		x.Offset = cur.getErrorOffset()
 	}
 }
 
-// Perform the work of executing a cursor and set the rowcount appropriately
-// regardless of whether an error takes place.
+// internalExecute performs the work of executing a cursor and
+// sets the rowcount appropriately regardless of whether an error takes place.
 func (cur *Cursor) internalExecute(numIters uint) error {
 	var mode C.ub4
 
@@ -344,7 +356,7 @@ func (cur *Cursor) internalExecute(numIters uint) error {
 	return cur.setRowCount()
 }
 
-// Determine if the cursor is executing a select statement.
+// getStatementType determines if the cursor is executing a select statement.
 func (cur *Cursor) getStatementType() error {
 	var statementType C.ub2
 	var vsize C.ub4
@@ -367,8 +379,8 @@ func (cur *Cursor) getStatementType() error {
 	return nil
 }
 
-// Fixup a cursor so that fetching and returning cursor descriptions are
-// successful after binding a cursor to another cursor.
+// fixupBoundCursor fixes a cursor so that fetching and returning cursor
+// descriptions are successful after binding a cursor to another cursor.
 func (cur *Cursor) fixupBoundCursor() error {
 	if cur.handle != nil && cur.statementType < 0 {
 		if err := cur.getStatementType(); err != nil {
@@ -386,8 +398,9 @@ func (cur *Cursor) fixupBoundCursor() error {
 	return nil
 }
 
-// Helper for Cursor_ItemDescription() used so that it is not necessary to
-// constantly free the descriptor when an error takes place.
+// itemDecriptionHelper is a helper for Cursor_ItemDescription() used
+// so that it is not necessary to constantly free the descriptor
+// when an error takes place.
 func (cur *Cursor) itemDescriptionHelper(pos uint, param *C.OCIParam) (desc VariableDescription, err error) {
 	var (
 		internalSize, charSize C.ub2
@@ -491,7 +504,7 @@ func (cur *Cursor) itemDescriptionHelper(pos uint, param *C.OCIParam) (desc Vari
 	return
 }
 
-// Return a tuple describing the item at the given position.
+// itemDescription returns a tuple describing the item at the given position.
 func (cur *Cursor) itemDescription(pos uint) (desc VariableDescription, err error) {
 	var param *C.OCIParam
 
@@ -517,8 +530,8 @@ func (cur *Cursor) itemDescription(pos uint) (desc VariableDescription, err erro
 	return
 }
 
-// Return a list of 7-tuples consisting of the description of the define
-// variables.
+// GetDescription returns a list of 7-tuples consisting of the
+// description of the define variables.
 func (cur *Cursor) GetDescription() (descs []VariableDescription, err error) {
 	var numItems int
 
@@ -570,7 +583,7 @@ func (cur *Cursor) Close() {
 	cur.isOpen = false
 }
 
-// Helper for setting a bind variable.
+// setBindVariableHelper is a helper for setting a bind variable.
 func (cur *Cursor) setBindVariableHelper(numElements, // number of elements to create
 	arrayPos uint, // array position to set
 	deferTypeAssignment bool, // defer type assignment if null?
@@ -674,7 +687,7 @@ func (cur *Cursor) setBindVariableHelper(numElements, // number of elements to c
 	return
 }
 
-// Create or set bind variables by position.
+// setBindVariablesByPos creates or sets bind variables by position.
 func (cur *Cursor) setBindVariablesByPos(parameters []interface{}, // parameters to bind
 	numElements, // number of elements to create
 	arrayPos uint, // array position to set
@@ -715,7 +728,7 @@ func (cur *Cursor) setBindVariablesByPos(parameters []interface{}, // parameters
 	return
 }
 
-// Create or set bind variables by position.
+// setBindVaruablesByName creates or sets bind variables by name (nap).
 func (cur *Cursor) setBindVariablesByName(parameters map[string]interface{}, // parameters to bind
 	numElements, // number of elements to create
 	arrayPos uint, // array position to set
@@ -747,7 +760,7 @@ func (cur *Cursor) setBindVariablesByName(parameters map[string]interface{}, // 
 	return
 }
 
-// Perform the binds on the cursor.
+// performBind performs the binds on the cursor.
 func (cur *Cursor) performBind() (err error) {
 	// PyObject *key, *var;
 	// Py_ssize_t pos;
@@ -776,7 +789,7 @@ func (cur *Cursor) performBind() (err error) {
 	return nil
 }
 
-// Create an object for the row. The object created is a tuple unless a row
+// createRow creates an object for the row. The object created is a tuple unless a row
 // factory function has been defined in which case it is the result of the
 // row factory function called with the argument tuple that would otherwise be
 // returned.
@@ -810,7 +823,7 @@ func (cur *Cursor) createRow() ([]interface{}, error) {
 	return row, nil
 }
 
-// Fetch current row's columns into the given pointers
+// fetchInto fetches current row's columns into the given pointers
 func (cur *Cursor) fetchInto(row ...interface{}) error {
 	var err error
 	// create a new tuple
@@ -846,13 +859,14 @@ func (cur *Cursor) fetchInto(row ...interface{}) error {
 	return nil
 }
 
+// IsDDL checks whether the cursor is of Data Definition Language
 func (cur *Cursor) IsDDL() bool {
 	return cur.statementType == C.OCI_STMT_CREATE ||
 		cur.statementType == C.OCI_STMT_DROP ||
 		cur.statementType == C.OCI_STMT_ALTER
 }
 
-// Internal method for preparing a statement for execution.
+// internalPrepare is an internal method for preparing a statement for execution.
 func (cur *Cursor) internalPrepare(statement string, statementTag string) error {
 	// make sure we don't get a situation where nothing is to be executed
 	if statement == "" && cur.statement == nil {
@@ -1129,7 +1143,7 @@ func (cur *Cursor) call( // cursor to call procedure/function
 	return cur.Execute(statement, bindVarArrs, nil)
 }
 
-// Call a stored function and return the return value of the function.
+// CallFunc calls a stored function and return the return value of the function.
 func (cur *Cursor) CallFunc(
 	name string,
 	returnType VariableType,
@@ -1151,7 +1165,7 @@ func (cur *Cursor) CallFunc(
 	return variable.GetValue(0)
 }
 
-// Call a stored procedure and return the (possibly modified) arguments.
+// CallProc calls a stored procedure and return the (possibly modified) arguments.
 func (cur *Cursor) CallProc(name string,
 	parameters []interface{}, keywordParameters map[string]interface{}) (
 	results []interface{}, err error) {
@@ -1241,8 +1255,8 @@ func (cur *Cursor) Execute(statement string,
 	return nil
 }
 
-// Execute the statement many times. The number of times is equivalent to the
-// number of elements in the array of dictionaries.
+// ExecuteMany executes the statement many times.
+// The number of times is equivalent to the number of elements in the array of dictionaries.
 func (cur *Cursor) ExecuteMany(statement string, params []map[string]interface{}) error {
 	// make sure the cursor is open
 	if !cur.isOpen {
@@ -1283,8 +1297,8 @@ func (cur *Cursor) ExecuteMany(statement string, params []map[string]interface{}
 	return nil
 }
 
-// Execute the prepared statement the number of times requested. At this
-// point, the statement must have been already prepared and the bind variables
+// ExecuteManyPrepared executes the prepared statement the number of times requested.
+// At this point, the statement must have been already prepared and the bind variables
 // must have their values set.
 func (cur *Cursor) ExecuteManyPrepared(numIters uint) error {
 	if numIters > cur.bindArraySize {
@@ -1415,7 +1429,7 @@ func (cur *Cursor) multiFetch(rowLimit int) (results [][]interface{}, err error)
 	return
 }
 
-// Fetch a single row from the cursor.
+// FetchOne fetches a single row from the cursor.
 func (cur *Cursor) FetchOne() (row []interface{}, err error) {
 	// verify fetch can be performed
 	if err = cur.verifyFetch(); err != nil {
@@ -1429,7 +1443,7 @@ func (cur *Cursor) FetchOne() (row []interface{}, err error) {
 	return cur.createRow()
 }
 
-// Fetch a single row from the cursor into the given column pointers
+// FetchOneInto fetches a single row from the cursor into the given column pointers
 func (cur *Cursor) FetchOneInto(row ...interface{}) (err error) {
 	// verify fetch can be performed
 	if err = cur.verifyFetch(); err != nil {
@@ -1448,7 +1462,7 @@ func (cur *Cursor) FetchOneInto(row ...interface{}) (err error) {
 	return
 }
 
-// Fetch multiple rows from the cursor based on the arraysize.
+// FetchMany fetches multiple rows from the cursor based on the arraysize.
 // for default (arraySize) row limit, use negative rowLimit
 func (cur *Cursor) FetchMany(rowLimit int) ([][]interface{}, error) {
 	// parse arguments -- optional rowlimit expected
@@ -1464,7 +1478,7 @@ func (cur *Cursor) FetchMany(rowLimit int) ([][]interface{}, error) {
 	return cur.multiFetch(rowLimit)
 }
 
-// Fetch all remaining rows from the cursor.
+// FetchAll fetches all remaining rows from the cursor.
 func (cur *Cursor) FetchAll() ([][]interface{}, error) {
 	if err := cur.verifyFetch(); err != nil {
 		return nil, err
@@ -1472,7 +1486,7 @@ func (cur *Cursor) FetchAll() ([][]interface{}, error) {
 	return cur.multiFetch(0)
 }
 
-// Perform raw fetch on the cursor; return the actual number of rows fetched.
+// fetchRaw performs a raw fetch on the cursor; return the actual number of rows fetched.
 func (cur *Cursor) fetchRaw(numRows uint) (int, error) {
 	if numRows > cur.fetchArraySize {
 		return -1, errors.New("rows to fetch exceeds array size")
@@ -1496,7 +1510,7 @@ func (cur *Cursor) fetchRaw(numRows uint) (int, error) {
 	return numRowsFetched, nil
 }
 
-// Set the sizes of the bind variables by position (array).
+// SetInputSizesByPos sets the sizes of the bind variables by position (array).
 func (cur *Cursor) SetInputSizesByPos(types []VariableType) error {
 	// make sure the cursor is open
 	if !cur.isOpen {
@@ -1523,7 +1537,7 @@ func (cur *Cursor) SetInputSizesByPos(types []VariableType) error {
 	return nil
 }
 
-// Set the sizes of the bind variables by name (map).
+// SetInputSizesByName sets the sizes of the bind variables by name (map).
 func (cur *Cursor) SetInputSizesByName(types map[string]VariableType) error {
 	// make sure the cursor is open
 	if !cur.isOpen {
@@ -1546,14 +1560,14 @@ func (cur *Cursor) SetInputSizesByName(types map[string]VariableType) error {
 	return nil
 }
 
-// Set the size of all of the long columns or just one of them.
+// SetOutputSize sets the size of all of the long columns or just one of them.
 // use -1 for outputSizeColumn if set outputSize for all columns!
 func (cur *Cursor) SetOutputSize(outputSize, outputSizeColumn int) {
 	cur.outputSize = outputSize
 	cur.outputSizeColumn = outputSizeColumn
 }
 
-// Create a bind variable and return it.
+// NewVar creates a bind variable and return it.
 func (cur *Cursor) NewVar(value interface{}, /*inconverter, outconverter, typename*/
 ) (v *Variable, err error) {
 	// determine the type of variable
@@ -1596,7 +1610,7 @@ func (cur *Cursor) NewVar(value interface{}, /*inconverter, outconverter, typena
 	return
 }
 
-// Create an array bind variable and return it.
+// NewArrayVar creates an array bind variable and return it.
 func (cur *Cursor) NewArrayVar(varType *VariableType, values []interface{}, size uint) (v *Variable, err error) {
 	if varType.isVariableLength && size == 0 {
 		size = varType.size
@@ -1621,7 +1635,7 @@ func (cur *Cursor) NewArrayVar(varType *VariableType, values []interface{}, size
 	return
 }
 
-// Return a list of bind variable names.
+// GetBindNames returns a list of bind variable names.
 func (cur *Cursor) GetBindNames() ([]string, error) {
 	// make sure the cursor is open
 	if !cur.isOpen {
@@ -1647,7 +1661,7 @@ static PyObject *Cursor_GetIter(
 }
 */
 
-// Return a reference to the cursor which supports the iterator protocol.
+// getNext returns a reference to the cursor which supports the iterator protocol.
 func (cur *Cursor) getNext() error {
 	if err := cur.verifyFetch(); err != nil {
 		return err
