@@ -1,3 +1,5 @@
+package oracle
+
 /*
 Copyright 2013 Tamás Gulácsi
 
@@ -13,7 +15,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-package oracle
 
 /*
 #cgo CFLAGS: -I/usr/include/oracle/11.2/client64
@@ -43,7 +44,9 @@ import (
 // debug("bindInfo_elementSize=%d", C.bindInfo_elementSize)
 // }
 
+// Cursor holds the handles for a cursor
 type Cursor struct {
+	// private or unexported fields
 	handle                                      *C.OCIStmt
 	connection                                  *Connection
 	environment                                 *Environment
@@ -59,11 +62,15 @@ type Cursor struct {
 	numbersAsStrings, isDML, isOpen, isOwned    bool
 }
 
-var DefaultArraySize uint = 50 //default array size
+//DefaultArraySize is the default array (PL/SQL) size
+var DefaultArraySize uint = 50
 var (
-	CursorIsClosed      = errors.New("cursor is closed")                         //cursor is closed
-	QueriesNotSupported = errors.New("queries not supported: results undefined") //queries not supported
-	ListIsEmpty         = errors.New("list is empty")                            //list is empty
+	//CursorIsClosed prints cursor is closed
+	CursorIsClosed = errors.New("cursor is closed")
+	//QueriesNotSupported prints queries not supported
+	QueriesNotSupported = errors.New("queries not supported: results undefined")
+	//ListIsEmpty prints list is empty
+	ListIsEmpty = errors.New("list is empty")
 )
 
 //statement // statementTag // rowFactory // inputTypeHandler // outputTypeHandler
@@ -218,7 +225,7 @@ func (cur *Cursor) getBindInfo(numElements int) ([]string, error) {
 // At this point it is assumed that the statement being executed is in fact a query.
 func (cur *Cursor) performDefine() error {
 	var numParams uint
-	var x C.ub4 = 0
+	var x = C.ub4(0)
 
 	// determine number of items in select-list
 	if CTrace {
@@ -1136,7 +1143,7 @@ func (cur *Cursor) call( // cursor to call procedure/function
 	return cur.Execute(statement, bindVarArrs, nil)
 }
 
-// Call a stored function and return the return value of the function.
+// CallFunc calls a stored function and return the return value of the function.
 func (cur *Cursor) CallFunc(
 	name string,
 	returnType VariableType,
@@ -1158,7 +1165,7 @@ func (cur *Cursor) CallFunc(
 	return variable.GetValue(0)
 }
 
-// Call a stored procedure and return the (possibly modified) arguments.
+// CallProc calls a stored procedure and return the (possibly modified) arguments.
 func (cur *Cursor) CallProc(name string,
 	parameters []interface{}, keywordParameters map[string]interface{}) (
 	results []interface{}, err error) {
@@ -1248,8 +1255,8 @@ func (cur *Cursor) Execute(statement string,
 	return nil
 }
 
-// Execute the statement many times. The number of times is equivalent to the
-// number of elements in the array of dictionaries.
+// ExecuteMany executes the statement many times.
+// The number of times is equivalent to the number of elements in the array of dictionaries.
 func (cur *Cursor) ExecuteMany(statement string, params []map[string]interface{}) error {
 	// make sure the cursor is open
 	if !cur.isOpen {
@@ -1290,8 +1297,8 @@ func (cur *Cursor) ExecuteMany(statement string, params []map[string]interface{}
 	return nil
 }
 
-// Execute the prepared statement the number of times requested. At this
-// point, the statement must have been already prepared and the bind variables
+// ExecuteManyPrepared executes the prepared statement the number of times requested.
+// At this point, the statement must have been already prepared and the bind variables
 // must have their values set.
 func (cur *Cursor) ExecuteManyPrepared(numIters uint) error {
 	if numIters > cur.bindArraySize {

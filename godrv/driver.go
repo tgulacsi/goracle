@@ -34,8 +34,10 @@ import (
 )
 
 var (
-	NotImplemented = errors.New("Not implemented") // Not implemented
-	IsDebug        bool                            //should we print debug logs?
+	// NotImplemented prints Not implemented
+	NotImplemented = errors.New("Not implemented")
+	// IsDebug should we print debug logs?
+	IsDebug bool
 )
 
 type conn struct {
