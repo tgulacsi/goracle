@@ -370,3 +370,8 @@ func (env *Environment) FromEncodedString(text []byte) string {
 	// log.Printf("FromEncodedString(%v=%s)", text, text)
 	return string(text)
 }
+
+//FromEncodedBytes returns string decoded from Oracle's representation
+func (env *Environment) FromEncodedBytes(text *C.char, length C.ub4) string {
+	return env.FromEncodedString(C.GoBytes(unsafe.Pointer(text), C.int(length)))
+}
