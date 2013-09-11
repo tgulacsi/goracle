@@ -19,23 +19,14 @@ limitations under the License.
 /*
 #cgo LDFLAGS: -lclntsh
 
-#include <stdlib.h>
 #include <oci.h>
-//#include <string.h>
-//#include <xa.h>
-
-sword setCallback(dvoid *handle, OCIError *errhp) {
-    return OCIAttrSet(handle, OCI_HTYPE_SUBSCRIPTION,
-				(dvoid*)callback, 0, OCI_ATTR_SUBSCR_CALLBACK,
-				errhp);
-}
+#include "subscription_cb.h"
 */
 import "C"
 
 import (
 	"errors"
 	"fmt"
-	"log"
 	"time"
 	"unsafe"
 )
@@ -268,23 +259,6 @@ func (s subscription) callbackHandler(env *Environment, descriptor unsafe.Pointe
 	return nil
 }
 
-// Callback is the routine that is called when a callback needs to be invoked.
-//notification_callback (dvoid *ctx, OCISubscription *subscrhp, dvoid *payload, ub4 paylen, dvoid *desc, ub4 mode)
-//export callback
-func callback(ctx unsafe.Pointer, handle unsafe.Pointer, payload unsafe.Pointer, payloadLength C.ub4, descriptor unsafe.Pointer, mode C.ub4) C.ub4 {
-	env, err := NewEnvironment()
-	if err != nil {
-		log.Printf("ERROR creating new environment in subscription callback: %s", err)
-		return 0
-	}
-
-	s := (*subscription)(unsafe.Pointer(ctx))
-	if err = s.callbackHandler(env, descriptor); err != nil {
-		return 0
-	}
-	return 1
-}
-
 // Register the subscription.
 func (s *subscription) Register() error {
 	var err error
@@ -351,7 +325,7 @@ func (s *subscription) Register() error {
 	// set the callback, if applicable
 	if s.happened != nil {
 		if err = env.CheckStatus(
-			C.setCallback(unsafe.Pointer(s.handle), env.errorHandle),
+			C.setSubsCallback(s.handle, env.errorHandle, C.callbackp),
 			"Subscription_Register(): set callback"); err != nil {
 			return err
 		}
