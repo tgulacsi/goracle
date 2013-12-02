@@ -18,7 +18,7 @@ limitations under the License.
 
 /*
 
-#cgo LDFLAGS: -lclntsh
+#cgo pkg-config: oci8
 
 #include <stdlib.h>
 #include <oci.h>

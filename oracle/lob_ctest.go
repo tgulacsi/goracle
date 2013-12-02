@@ -84,7 +84,7 @@ package oracle
 
 /*
 
-#cgo LDFLAGS: -lclntsh
+#cgo pkg-config: oci8
 
 #include <stdlib.h>
 #include <string.h>
@@ -163,7 +163,7 @@ import (
 	"fmt"
 	"log"
 
-//"time"
+	//"time"
 )
 
 func testLobOutC(cur *Cursor, qry string) (err error) {

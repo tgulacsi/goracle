@@ -26,7 +26,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/tgulacsi/goracle/oracle"
+	"github.com/linphy/goracle/oracle"
 )
 
 var (
