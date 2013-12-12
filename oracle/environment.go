@@ -19,7 +19,7 @@ package oracle
 
 /*
 
-#cgo LDFLAGS: -lclntsh
+#cgo pkg-config: oci8
 
 //#include <stdio.h>
 #include <oci.h>
