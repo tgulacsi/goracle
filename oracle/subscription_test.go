@@ -27,7 +27,7 @@ func TestSubscription(t *testing.T) {
 	}
 	defer conn.Close()
 	happened := make(chan *Message, 1)
-	subs, err := NewOCISubscription(&conn, 5*time.Second, 0, false, happened)
+	subs, err := NewOCISubscription(&conn, "", 5*time.Second, 0, false, happened)
 	if err != nil {
 		t.Errorf("NewOCISubscription: %v", subs)
 		t.FailNow()

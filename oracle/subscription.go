@@ -25,8 +25,10 @@ limitations under the License.
 import "C"
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 	"unsafe"
 )
@@ -34,6 +36,7 @@ import (
 type subscription struct {
 	handle                                         *C.OCISubscription
 	connection                                     *Connection
+	name                                           []byte
 	namespace, protocol, port, timeout, operations C.ub4
 	rowids, qos_reliable                           bool
 	happened                                       chan<- *Message
@@ -274,24 +277,15 @@ func (s *subscription) Register() error {
 		return err
 	}
 
-	// set the namespace
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&s.namespace), C.sizeof_ub4,
-			C.OCI_ATTR_SUBSCR_NAMESPACE,
-			env.errorHandle),
-		"Subscription_Register(): set namespace"); err != nil {
-		return err
-	}
-
-	// set the protocol
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&s.protocol), C.sizeof_ub4,
-			C.OCI_ATTR_SUBSCR_RECPTPROTO,
-			env.errorHandle),
-		"Subscription_Register(): set protocol"); err != nil {
-		return err
+	// set the TCP port used on client to listen for callback from DB server
+	if s.port > 0 {
+		if err = env.CheckStatus(
+			C.OCIAttrSet(unsafe.Pointer(env.handle), C.OCI_HTYPE_ENV,
+				unsafe.Pointer(&s.port), C.ub4(0), C.OCI_ATTR_SUBSCR_PORTNO,
+				env.errorHandle),
+			"Subscription_Register(): set port"); err != nil {
+			return err
+		}
 	}
 
 	// set the timeout
@@ -304,29 +298,51 @@ func (s *subscription) Register() error {
 		return err
 	}
 
-	// set the TCP port used on client to listen for callback from DB server
-	if s.port > 0 {
-		if err = env.CheckStatus(
-			C.OCIAttrSet(unsafe.Pointer(env.handle), C.OCI_HTYPE_ENV,
-				unsafe.Pointer(&s.port), C.ub4(0), C.OCI_ATTR_SUBSCR_PORTNO,
-				env.errorHandle),
-			"Subscription_Register(): set port"); err != nil {
-			return err
-		}
-	}
-
-	// set the context for the callback
+	// set the name
 	if err = env.CheckStatus(
 		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(s), 0, C.OCI_ATTR_SUBSCR_CTX, env.errorHandle),
-		"Subscription_Register(): set context"); err != nil {
+			unsafe.Pointer(&s.name[0]), C.ub4(len(s.name)),
+			C.OCI_ATTR_SUBSCR_NAME,
+			env.errorHandle),
+		"Subscription_Register(): set namespace"); err != nil {
+		return err
+	}
+
+	// set the namespace
+	if s.namespace != C.OCI_SUBSCR_NAMESPACE_DBCHANGE {
+		log.Printf("subscription namespace is %d, not DBCHANGE!", s.namespace)
+	}
+	if err = env.CheckStatus(
+		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+			unsafe.Pointer(&s.namespace), C.sizeof_ub4,
+			C.OCI_ATTR_SUBSCR_NAMESPACE,
+			env.errorHandle),
+		"Subscription_Register(): set namespace"); err != nil {
+		return err
+	}
+
+	// set the protocol
+	if s.protocol != C.OCI_SUBSCR_PROTO_OCI {
+		log.Printf("subscription protocol is %d, not OCI!", s.protocol)
+	}
+	if err = env.CheckStatus(
+		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+			unsafe.Pointer(&s.protocol), C.sizeof_ub4,
+			C.OCI_ATTR_SUBSCR_RECPTPROTO,
+			env.errorHandle),
+		"Subscription_Register(): set protocol"); err != nil {
 		return err
 	}
 
 	// set the callback, if applicable
 	if s.happened != nil {
+		log.Println("subscription: setting callback")
 		if err = env.CheckStatus(
-			C.setSubsCallback(s.handle, env.errorHandle, C.callbackp),
+			C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+				unsafe.Pointer(&C.callback),
+				0, C.OCI_ATTR_SUBSCR_CALLBACK,
+				env.errorHandle),
+			//C.setSubsCallback(s.handle, env.errorHandle, C.callbackp),
 			"Subscription_Register(): set callback"); err != nil {
 			return err
 		}
@@ -345,27 +361,37 @@ func (s *subscription) Register() error {
 		return err
 	}
 
-	// set which operations are desired
+	// set the context for the callback
 	if err = env.CheckStatus(
 		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&s.operations), C.sizeof_ub4, C.OCI_ATTR_CHNF_OPERATIONS,
-			env.errorHandle),
-		"Subscription_Register(): set operations"); err != nil {
+			unsafe.Pointer(s), 0, C.OCI_ATTR_SUBSCR_CTX, env.errorHandle),
+		"Subscription_Register(): set context"); err != nil {
 		return err
 	}
 
-	// set notification reliability
-	qos := C.ub4(0)
-	if s.qos_reliable {
-		qos++
-	}
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&qos), C.sizeof_ub4, C.OCI_ATTR_SUBSCR_QOSFLAGS,
-			env.errorHandle),
-		"Subscription_Register(): set qos reliability"); err != nil {
-		return err
-	}
+	/*
+		// set which operations are desired
+		if err = env.CheckStatus(
+			C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+				unsafe.Pointer(&s.operations), C.sizeof_ub4, C.OCI_ATTR_CHNF_OPERATIONS,
+				env.errorHandle),
+			"Subscription_Register(): set operations"); err != nil {
+			return err
+		}
+
+		// set notification reliability
+		qos := C.ub4(0)
+		if s.qos_reliable {
+			qos++
+		}
+		if err = env.CheckStatus(
+			C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+				unsafe.Pointer(&qos), C.sizeof_ub4, C.OCI_ATTR_SUBSCR_QOSFLAGS,
+				env.errorHandle),
+			"Subscription_Register(): set qos reliability"); err != nil {
+			return err
+		}
+	*/
 
 	// register the subscription
 	//Py_BEGIN_ALLOW_THREADS
@@ -381,18 +407,36 @@ func (s *subscription) Register() error {
 }
 
 // NewSubscription allocates a new subscription object.
-func NewSubscription(connection *Connection, namespace, protocol, port uint,
+func NewSubscription(connection *Connection, name string,
+	namespace, protocol, port uint,
 	timeout time.Duration, operations uint,
 	rowids bool, happened chan<- *Message) (*subscription, error) {
 
 	if namespace <= 0 {
 		namespace = C.OCI_SUBSCR_NAMESPACE_DBCHANGE
 	}
+	if protocol <= 0 {
+		protocol = C.OCI_SUBSCR_PROTO_OCI
+	}
 	if operations <= 0 {
 		operations = C.OCI_OPCODE_INSERT | C.OCI_OPCODE_DELETE | C.OCI_OPCODE_UPDATE
 	}
+	var nameB []byte
+	if name != "" {
+		nameB = []byte(name)
+	} else {
+		nameB = make([]byte, 16)
+		n, err := rand.Read(nameB)
+		if err != nil {
+			return nil, err
+		}
+		if n < 16 {
+			nameB = nameB[:n]
+		}
+	}
 	s := &subscription{connection: connection, namespace: C.ub4(namespace),
 		protocol: C.ub4(protocol), port: C.ub4(port), operations: C.ub4(operations),
+		name:   nameB,
 		rowids: rowids, timeout: C.ub4(timeout.Seconds()),
 		happened: happened}
 
@@ -400,8 +444,10 @@ func NewSubscription(connection *Connection, namespace, protocol, port uint,
 }
 
 // NewOCISubscription allocates a new subscription for OCI notification protocol
-func NewOCISubscription(connection *Connection, timeout time.Duration, operations uint, rowids bool, happened chan<- *Message) (*subscription, error) {
-	return NewSubscription(connection, C.OCI_SUBSCR_NAMESPACE_DBCHANGE, C.OCI_SUBSCR_PROTO_OCI, 0, timeout, operations, rowids, happened)
+func NewOCISubscription(connection *Connection, name string, timeout time.Duration, operations uint, rowids bool, happened chan<- *Message) (*subscription, error) {
+	return NewSubscription(connection, name,
+		C.OCI_SUBSCR_NAMESPACE_DBCHANGE, C.OCI_SUBSCR_PROTO_OCI, 0,
+		timeout, operations, rowids, happened)
 }
 
 // Free the memory associated with a subscription.
@@ -410,6 +456,8 @@ func (s *subscription) Free() {
 		C.OCISubscriptionUnRegister(s.connection.handle,
 			s.handle, s.connection.environment.errorHandle,
 			C.OCI_DEFAULT)
+		C.OCIHandleFree(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION)
+		s.handle = nil
 	}
 	s.connection = nil
 	s.happened = nil
