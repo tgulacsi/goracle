@@ -267,84 +267,67 @@ func (s subscription) callbackHandler(env *Environment, descriptor unsafe.Pointe
 func (s *subscription) Register() error {
 	var err error
 
+	// Try this: http://web.njit.edu/info/oracle/DOC/server.102/b14257/ap_oci.htm#CIHIHGDD
+
 	// create the subscription handle
 	env := s.connection.environment
-	if err = env.CheckStatus(
-		C.OCIHandleAlloc(unsafe.Pointer(env.handle),
-			(*unsafe.Pointer)(unsafe.Pointer(&s.handle)),
-			C.OCI_HTYPE_SUBSCRIPTION, 0, nil),
-		"Subscription_Register(): allocate handle"); err != nil {
+	if ociHandleAlloc(unsafe.Pointer(env.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		(*unsafe.Pointer)(unsafe.Pointer(&s.handle)),
+		"Subscription_Register(): allocate_handle"); err != nil {
 		return err
 	}
 
 	// set the TCP port used on client to listen for callback from DB server
 	if s.port > 0 {
-		if err = env.CheckStatus(
-			C.OCIAttrSet(unsafe.Pointer(env.handle), C.OCI_HTYPE_ENV,
-				unsafe.Pointer(&s.port), C.ub4(0), C.OCI_ATTR_SUBSCR_PORTNO,
-				env.errorHandle),
-			"Subscription_Register(): set port"); err != nil {
-			return err
+		if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+			C.OCI_ATTR_SUBSCR_PORTNO,
+			unsafe.Pointer(&s.port), 0); err != nil {
+			return fmt.Errorf("Subscription_Register(): set port: %v", err)
 		}
 	}
 
 	// set the timeout
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&s.timeout), C.sizeof_ub4,
-			C.OCI_ATTR_SUBSCR_TIMEOUT,
-			env.errorHandle),
-		"Subscription_Register(): set timeout"); err != nil {
-		return err
+	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		C.OCI_ATTR_SUBSCR_TIMEOUT,
+		unsafe.Pointer(&s.timeout), C.sizeof_ub4); err != nil {
+		return fmt.Errorf("Subscription_Register(): set timeout: %v", err)
 	}
 
 	// set the name
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&s.name[0]), C.ub4(len(s.name)),
-			C.OCI_ATTR_SUBSCR_NAME,
-			env.errorHandle),
-		"Subscription_Register(): set namespace"); err != nil {
-		return err
+	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		C.OCI_ATTR_SUBSCR_NAME,
+		unsafe.Pointer(&s.name[0]), len(s.name)); err != nil {
+		return fmt.Errorf("Subscription_Register(): set namespace: %v", err)
 	}
 
 	// set the namespace
 	if s.namespace != C.OCI_SUBSCR_NAMESPACE_DBCHANGE {
 		log.Printf("subscription namespace is %d, not DBCHANGE!", s.namespace)
 	}
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&s.namespace), C.sizeof_ub4,
-			C.OCI_ATTR_SUBSCR_NAMESPACE,
-			env.errorHandle),
-		"Subscription_Register(): set namespace"); err != nil {
-		return err
+	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		C.OCI_ATTR_SUBSCR_NAMESPACE,
+		unsafe.Pointer(&s.namespace), C.sizeof_ub4); err != nil {
+		return fmt.Errorf("Subscription_Register(): set namespace: %v", err)
 	}
 
 	// set the protocol
 	if s.protocol != C.OCI_SUBSCR_PROTO_OCI {
 		log.Printf("subscription protocol is %d, not OCI!", s.protocol)
 	}
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&s.protocol), C.sizeof_ub4,
-			C.OCI_ATTR_SUBSCR_RECPTPROTO,
-			env.errorHandle),
-		"Subscription_Register(): set protocol"); err != nil {
-		return err
+	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		C.OCI_ATTR_SUBSCR_RECPTPROTO,
+		unsafe.Pointer(&s.protocol), C.sizeof_ub4); err != nil {
+		return fmt.Errorf("Subscription_Register(): set protocol: %v", err)
 	}
 
 	// set the callback, if applicable
 	if s.happened != nil {
 		log.Println("subscription: setting callback")
-		if err = env.CheckStatus(
-			C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-				unsafe.Pointer(&C.callback),
-				0, C.OCI_ATTR_SUBSCR_CALLBACK,
-				env.errorHandle),
+		if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+			C.OCI_ATTR_SUBSCR_CALLBACK,
+			unsafe.Pointer(&C.callback), 0); err != nil {
 			//C.setSubsCallback(s.handle, env.errorHandle, C.callbackp),
-			"Subscription_Register(): set callback"); err != nil {
-			return err
+			return fmt.Errorf("Subscription_Register(): set callback: %v", err)
 		}
 	}
 
@@ -353,20 +336,17 @@ func (s *subscription) Register() error {
 	if s.rowids {
 		rowids = 1
 	}
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&rowids), C.sizeof_ub4, C.OCI_ATTR_CHNF_ROWIDS,
-			env.errorHandle),
-		"Subscription_Register(): set rowids"); err != nil {
-		return err
+	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		C.OCI_ATTR_CHNF_ROWIDS,
+		unsafe.Pointer(&rowids), C.sizeof_ub4); err != nil {
+		return fmt.Errorf("Subscription_Register(): set rowids: %v", err)
 	}
 
 	// set the context for the callback
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(s), 0, C.OCI_ATTR_SUBSCR_CTX, env.errorHandle),
-		"Subscription_Register(): set context"); err != nil {
-		return err
+	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		C.OCI_ATTR_SUBSCR_CTX,
+		unsafe.Pointer(s), 8); err != nil {
+		return fmt.Errorf("Subscription_Register(): set context: %v", err)
 	}
 
 	/*

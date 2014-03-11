@@ -166,6 +166,9 @@ func (env *Environment) Free() error {
 
 func ociHandleAlloc(parent unsafe.Pointer, typ C.ub4, dst *unsafe.Pointer, at string) error {
 	// var vsize C.ub4
+	if CTrace {
+		ctrace("OCIHandleAlloc(parent=%p, typ=%d, dst=%p)", parent, typ, dst)
+	}
 	if err := checkStatus(C.OCIHandleAlloc(parent, dst, typ, C.size_t(0), nil), false); err != nil {
 		return errors.New(at + ": " + err.Error())
 	}
@@ -184,6 +187,11 @@ func (env *Environment) ociDescrAlloc(dst *unsafe.Pointer, typ C.ub4, at string)
 //AttrSet sets an attribute on the given parent pointer
 func (env *Environment) AttrSet(parent unsafe.Pointer, parentTyp C.ub4,
 	key C.ub4, value unsafe.Pointer, valueLength int) error {
+
+	if CTrace {
+		ctrace("AttrSet(parent=%p, parentTyp=%d, key=%d, value=%p, valueLength=%d)", parent, parentTyp, key, value, valueLength)
+	}
+
 	return env.CheckStatus(C.OCIAttrSet(parent, parentTyp,
 		value, C.ub4(valueLength),
 		key, env.errorHandle),
