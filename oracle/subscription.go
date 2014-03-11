@@ -1,3 +1,5 @@
+// +build !nosubscription
+
 package oracle
 
 /*
@@ -32,6 +34,8 @@ import (
 	"time"
 	"unsafe"
 )
+
+const ModeSubscription = C.OCI_EVENTS
 
 type subscription struct {
 	handle                                         *C.OCISubscription
@@ -267,7 +271,11 @@ func (s subscription) callbackHandler(env *Environment, descriptor unsafe.Pointe
 func (s *subscription) Register() error {
 	var err error
 
-	// Try this: http://web.njit.edu/info/oracle/DOC/server.102/b14257/ap_oci.htm#CIHIHGDD
+	//
+	// WARNING! for this the environment MUST BE opened with OCI_EVENTS mode!
+	//
+	// https://www.stanford.edu/dept/itss/docs/oracle/10gR2/appdev.102/b14251/adfns_dcn.htm#BDCEJDDG
+	// the user is required to have the CHANGE NOTIFICATION system privilege. In addition the user is required to have SELECT privileges on all objects to be registered
 
 	// create the subscription handle
 	env := s.connection.environment
@@ -345,33 +353,31 @@ func (s *subscription) Register() error {
 	// set the context for the callback
 	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 		C.OCI_ATTR_SUBSCR_CTX,
-		unsafe.Pointer(s), 8); err != nil {
+		unsafe.Pointer(s), C.sizeof_void); err != nil {
 		return fmt.Errorf("Subscription_Register(): set context: %v", err)
 	}
 
-	/*
-		// set which operations are desired
-		if err = env.CheckStatus(
-			C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-				unsafe.Pointer(&s.operations), C.sizeof_ub4, C.OCI_ATTR_CHNF_OPERATIONS,
-				env.errorHandle),
-			"Subscription_Register(): set operations"); err != nil {
-			return err
-		}
+	// set which operations are desired
+	if err = env.CheckStatus(
+		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+			unsafe.Pointer(&s.operations), C.sizeof_ub4, C.OCI_ATTR_CHNF_OPERATIONS,
+			env.errorHandle),
+		"Subscription_Register(): set operations"); err != nil {
+		return err
+	}
 
-		// set notification reliability
-		qos := C.ub4(0)
-		if s.qos_reliable {
-			qos++
-		}
-		if err = env.CheckStatus(
-			C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-				unsafe.Pointer(&qos), C.sizeof_ub4, C.OCI_ATTR_SUBSCR_QOSFLAGS,
-				env.errorHandle),
-			"Subscription_Register(): set qos reliability"); err != nil {
-			return err
-		}
-	*/
+	// set notification reliability
+	qos := C.ub4(0)
+	if s.qos_reliable {
+		qos++
+	}
+	if err = env.CheckStatus(
+		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+			unsafe.Pointer(&qos), C.sizeof_ub4, C.OCI_ATTR_SUBSCR_QOSFLAGS,
+			env.errorHandle),
+		"Subscription_Register(): set qos reliability"); err != nil {
+		return err
+	}
 
 	// register the subscription
 	//Py_BEGIN_ALLOW_THREADS
@@ -503,12 +509,13 @@ func (s *subscription) RegisterQuery(qry string,
 	}
 
 	// set the subscription handle
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
-			unsafe.Pointer(s.handle), 0,
-			C.OCI_ATTR_CHNF_REGHANDLE, env.errorHandle),
-		"Subscription_RegisterQuery(): set subscription handle"); err != nil {
-		return err
+	if s.handle == nil {
+		return fmt.Errorf("Subscription_RegisterQuery(): subscription handle is nil!")
+	}
+	if err = env.AttrSet(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
+		C.OCI_ATTR_CHNF_REGHANDLE,
+		unsafe.Pointer(s.handle), 0); err != nil {
+		return fmt.Errorf("Subscription_RegisterQuery(): set subscription handle: %v", err)
 	}
 
 	// execute the query which registers it

@@ -34,7 +34,7 @@ func TestSubscription(t *testing.T) {
 	}
 	defer subs.Close()
 
-	if err = subs.RegisterQuery("SELECT * FROM cat", nil, nil); err != nil {
+	if err = subs.RegisterQuery("SELECT * FROM GOSQLTEST_T", nil, nil); err != nil {
 		t.Errorf("error registering query SELECT * FROM cat: %v", err)
 		t.FailNow()
 	}

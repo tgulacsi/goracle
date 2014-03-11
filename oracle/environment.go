@@ -101,7 +101,8 @@ func NewEnvironment() (*Environment, error) {
 		// log.Printf("csid=%d", CsIDAl32UTF8)
 	}
 	if err = checkStatus(C.OCIEnvNlsCreate(
-		&env.handle, C.OCI_DEFAULT|C.OCI_THREADED, nil, nil, nil, nil, 0, nil,
+		&env.handle, C.OCI_DEFAULT|C.OCI_THREADED|ModeSubscription,
+		nil, nil, nil, nil, 0, nil,
 		CsIDAl32UTF8, CsIDAl32UTF8), false); err != nil {
 		setErrAt(err, "Unable to acquire Oracle environment handle with AL32UTF8 charset")
 		return nil, err
