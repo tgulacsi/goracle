@@ -32,6 +32,8 @@ import (
 
 //export callback
 func callback(ctx unsafe.Pointer, handle unsafe.Pointer, payload unsafe.Pointer, payloadLength C.ub4, descriptor unsafe.Pointer, mode C.ub4) C.ub4 {
+	log.Printf("callback(ctx=%p handle=%p payload=%p len=%d descr=%p mode=%d)",
+		ctx, handle, payload, payloadLength, descriptor, mode)
 	env, err := NewEnvironment()
 	if err != nil {
 		log.Printf("ERROR creating new environment in subscription callback: %s", err)

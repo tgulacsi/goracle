@@ -34,15 +34,17 @@ func TestSubscription(t *testing.T) {
 	}
 	defer subs.Close()
 
-	if err = subs.RegisterQuery("SELECT * FROM GOSQLTEST_T", nil, nil); err != nil {
-		t.Errorf("error registering query SELECT * FROM cat: %v", err)
-		t.FailNow()
-	}
 	cur := conn.NewCursor()
 	defer cur.Close()
-	if err = cur.Execute("CREATE TABLE TST_table (key VARCHAR2(10), value VARCHAR2(100))", nil, nil); err != nil {
+	if err = cur.Execute("CREATE TABLE TST_table (key VARCHAR2(10), value VARCHAR2(100))",
+		nil, nil); err != nil {
+
 		t.Errorf("error creating TST_table: %v", err)
 	}
 	defer cur.Execute("DROP TABLE TST_table", nil, nil)
 
+	if err = subs.RegisterQuery("SELECT key FROM TST_table", nil, nil); err != nil {
+		t.Errorf("error registering query SELECT * FROM TST_table: %v", err)
+		t.FailNow()
+	}
 }

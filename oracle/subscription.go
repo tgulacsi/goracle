@@ -35,6 +35,7 @@ import (
 	"unsafe"
 )
 
+// ModeSubscription is the required open mode for subscriptions to work
 const ModeSubscription = C.OCI_EVENTS
 
 type subscription struct {
@@ -42,7 +43,7 @@ type subscription struct {
 	connection                                     *Connection
 	name                                           []byte
 	namespace, protocol, port, timeout, operations C.ub4
-	rowids, qos_reliable                           bool
+	rowids, qosReliable                            bool
 	happened                                       chan<- *Message
 }
 
@@ -256,6 +257,7 @@ func (m *Message) Initialize(env *Environment, descriptor unsafe.Pointer) error 
 
 // callbackHandler is the routine that performs the actual call.
 func (s subscription) callbackHandler(env *Environment, descriptor unsafe.Pointer) error {
+	log.Printf("callbackHandler(%p, %p)", env, descriptor)
 	// create the message
 	m := new(Message)
 	if err := m.Initialize(env, descriptor); err != nil {
@@ -368,7 +370,7 @@ func (s *subscription) Register() error {
 
 	// set notification reliability
 	qos := C.ub4(0)
-	if s.qos_reliable {
+	if s.qosReliable {
 		qos++
 	}
 	if err = env.CheckStatus(
@@ -456,7 +458,7 @@ func (s *subscription) Close() error {
 
 // String returns a string representation of the subscription.
 func (s *subscription) String() string {
-	return fmt.Sprintf("<subscription on %s>", s.connection)
+	return fmt.Sprintf("<subscription on %v>", s.connection)
 }
 
 // Register a query for database change notification.

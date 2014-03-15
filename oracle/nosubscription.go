@@ -18,4 +18,5 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// ModeSubscription is the required open mode for subscriptions to work
 const ModeSubscription = 0
