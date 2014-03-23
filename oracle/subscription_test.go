@@ -36,15 +36,32 @@ func TestSubscription(t *testing.T) {
 
 	cur := conn.NewCursor()
 	defer cur.Close()
+	_ = cur.Execute("DROP TABLE TST_table", nil, nil)
 	if err = cur.Execute("CREATE TABLE TST_table (key VARCHAR2(10), value VARCHAR2(100))",
 		nil, nil); err != nil {
 
 		t.Errorf("error creating TST_table: %v", err)
+		t.FailNow()
 	}
 	defer cur.Execute("DROP TABLE TST_table", nil, nil)
 
 	if err = subs.RegisterQuery("SELECT key FROM TST_table", nil, nil); err != nil {
-		t.Errorf("error registering query SELECT * FROM TST_table: %v", err)
+		t.Errorf("error registering query SELECT key FROM TST_table: %v", err)
 		t.FailNow()
+	}
+
+	if err = cur.Execute("INSERT INTO TST_table (key, value) VALUES('a', 'b')", nil, nil); err != nil {
+		t.Errorf("error inserting into TST_table: %v", err)
+	}
+	if err = conn.Commit(); err != nil {
+		t.Errorf("error commiting: %v", err)
+		t.FailNow()
+	}
+	t.Logf("COMMIT - waiting for notification")
+	select {
+	case <-time.After(1 * time.Second):
+		t.Errorf("notification timeout")
+	case m := <-happened:
+		t.Logf("got message %#v", m)
 	}
 }

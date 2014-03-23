@@ -31,12 +31,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 	"unsafe"
 )
 
 // ModeSubscription is the required open mode for subscriptions to work
-const ModeSubscription = C.OCI_EVENTS
+const ModeSubscription = C.OCI_EVENTS | C.OCI_OBJECT
 
 type subscription struct {
 	handle                                         *C.OCISubscription
@@ -44,8 +45,12 @@ type subscription struct {
 	name                                           []byte
 	namespace, protocol, port, timeout, operations C.ub4
 	rowids, qosReliable                            bool
+	callbackID                                     uint8
 	happened                                       chan<- *Message
 }
+
+var callbacksMu sync.Mutex
+var callbacks map[uint8]*subscription
 
 // Message is the subscription message
 type Message struct {
@@ -79,31 +84,29 @@ type MessageRow struct {
 func (mr *MessageRow) Initialize(env *Environment, descriptor unsafe.Pointer) error {
 	var (
 		err         error
-		rowidLength C.ub4
+		rowidLength int
 		rowid       *C.char
 	)
 
 	// determine operation
-	if err = env.CheckStatus(
-		C.OCIAttrGet(descriptor, C.OCI_DTYPE_ROW_CHDES,
-			unsafe.Pointer(&mr.Operation), nil,
-			C.OCI_ATTR_CHDES_ROW_OPFLAGS, env.errorHandle),
-		"MessageRow_Initialize: get operation"); err != nil {
+	if _, err := env.AttrGet(descriptor, C.OCI_DTYPE_ROW_CHDES,
+		C.OCI_ATTR_CHDES_ROW_OPFLAGS, unsafe.Pointer(&mr.Operation),
+		"MessageRow_Initialize: get operation",
+	); err != nil {
 		return err
 	}
 
 	// determine table name
-	if err = env.CheckStatus(
-		C.OCIAttrGet(descriptor, C.OCI_DTYPE_ROW_CHDES,
-			unsafe.Pointer(&rowid), &rowidLength,
-			C.OCI_ATTR_CHDES_ROW_ROWID, env.errorHandle),
-		"MessageRow_Initialize(): get rowid"); err != nil {
+	if rowidLength, err = env.AttrGet(descriptor, C.OCI_DTYPE_ROW_CHDES,
+		C.OCI_ATTR_CHDES_ROW_ROWID, unsafe.Pointer(&rowid),
+		"MessageRow_Initialize(): get rowid",
+	); err != nil {
 		return err
 	}
 	if rowid == nil {
 		return errors.New("MessageRow_Initialize(): nil rowid")
 	}
-	mr.Rowid = env.FromEncodedBytes(rowid, rowidLength)
+	mr.Rowid = env.FromEncodedBytes(rowid, C.ub4(rowidLength))
 	return nil
 }
 
@@ -111,7 +114,7 @@ func (mr *MessageRow) Initialize(env *Environment, descriptor unsafe.Pointer) er
 func (mt *MessageTable) Initialize(env *Environment, descriptor unsafe.Pointer) error {
 	var (
 		err           error
-		nameLength    C.ub4
+		nameLength    int
 		name          *C.char
 		rows          *C.OCIColl
 		numRows       C.sb4
@@ -121,26 +124,24 @@ func (mt *MessageTable) Initialize(env *Environment, descriptor unsafe.Pointer) 
 	)
 
 	// determine operation
-	if err = env.CheckStatus(
-		C.OCIAttrGet(descriptor, C.OCI_DTYPE_TABLE_CHDES,
-			unsafe.Pointer(&mt.Operation), nil,
-			C.OCI_ATTR_CHDES_TABLE_OPFLAGS, env.errorHandle),
-		"MessageTable_Initialize(): get operation"); err != nil {
+	if _, err = env.AttrGet(descriptor, C.OCI_DTYPE_TABLE_CHDES,
+		C.OCI_ATTR_CHDES_TABLE_OPFLAGS, unsafe.Pointer(&mt.Operation),
+		"MessageTable_Initialize(): get operation",
+	); err != nil {
 		return err
 	}
 
 	// determine table name
-	if err = env.CheckStatus(
-		C.OCIAttrGet(descriptor, C.OCI_DTYPE_TABLE_CHDES,
-			unsafe.Pointer(&name), &nameLength,
-			C.OCI_ATTR_CHDES_TABLE_NAME, env.errorHandle),
-		"MessageTable_Initialize(): get table name"); err != nil {
+	if nameLength, err = env.AttrGet(descriptor, C.OCI_DTYPE_TABLE_CHDES,
+		C.OCI_ATTR_CHDES_TABLE_NAME, unsafe.Pointer(&name),
+		"MessageTable_Initialize(): get table name",
+	); err != nil {
 		return err
 	}
 	if name == nil {
 		return errors.New("MessageTable_Initialize(): empty table name")
 	}
-	mt.Name = env.FromEncodedBytes(name, nameLength)
+	mt.Name = env.FromEncodedBytes(name, C.ub4(nameLength))
 
 	// if change invalidated all rows, nothing to do
 	if mt.Operation&C.OCI_OPCODE_ALLROWS > 0 {
@@ -148,11 +149,10 @@ func (mt *MessageTable) Initialize(env *Environment, descriptor unsafe.Pointer) 
 	}
 
 	// determine rows collection
-	if err = env.CheckStatus(
-		C.OCIAttrGet(descriptor, C.OCI_DTYPE_TABLE_CHDES,
-			unsafe.Pointer(&rows), nil,
-			C.OCI_ATTR_CHDES_TABLE_ROW_CHANGES, env.errorHandle),
-		"MessageTable_Initialize(): get rows collection"); err != nil {
+	if _, err = env.AttrGet(descriptor, C.OCI_DTYPE_TABLE_CHDES,
+		C.OCI_ATTR_CHDES_TABLE_ROW_CHANGES, unsafe.Pointer(&rows),
+		"MessageTable_Initialize(): get rows collection",
+	); err != nil {
 		return err
 	}
 
@@ -186,7 +186,7 @@ func (m *Message) Initialize(env *Environment, descriptor unsafe.Pointer) error 
 	var (
 		err             error
 		dbname          *C.char
-		dbnameLength    C.ub4
+		dbnameLength    int
 		tables          *C.OCIColl
 		numTables       C.sb4
 		exists          C.boolean
@@ -195,33 +195,30 @@ func (m *Message) Initialize(env *Environment, descriptor unsafe.Pointer) error 
 	)
 
 	// determine type
-	if err = env.CheckStatus(
-		C.OCIAttrGet(descriptor, C.OCI_DTYPE_CHDES,
-			unsafe.Pointer(&m.Type), nil,
-			C.OCI_ATTR_CHDES_NFYTYPE, env.errorHandle),
-		"Message_Initialize(): get type"); err != nil {
+	if _, err = env.AttrGet(descriptor, C.OCI_DTYPE_CHDES,
+		C.OCI_ATTR_CHDES_NFYTYPE, unsafe.Pointer(&m.Type),
+		"Message_Initialize(): get type",
+	); err != nil {
 		return err
 	}
 
 	// determine database name
-	if err = env.CheckStatus(
-		C.OCIAttrGet(descriptor, C.OCI_DTYPE_CHDES,
-			unsafe.Pointer(&dbname), &dbnameLength,
-			C.OCI_ATTR_CHDES_DBNAME, env.errorHandle),
-		"Message_Initialize(): get database name"); err != nil {
+	if dbnameLength, err = env.AttrGet(descriptor, C.OCI_DTYPE_CHDES,
+		C.OCI_ATTR_CHDES_DBNAME, unsafe.Pointer(&dbname),
+		"Message_Initialize(): get database name",
+	); err != nil {
 		return err
 	}
 	if dbname == nil {
 		return errors.New("Message_Initialize(): empty dbname")
 	}
-	m.DBName = env.FromEncodedBytes(dbname, dbnameLength)
+	m.DBName = env.FromEncodedBytes(dbname, C.ub4(dbnameLength))
 
 	// determine table collection
-	if err = env.CheckStatus(
-		C.OCIAttrGet(descriptor, C.OCI_DTYPE_CHDES,
-			unsafe.Pointer(&tables), nil,
-			C.OCI_ATTR_CHDES_TABLE_CHANGES, env.errorHandle),
-		"Message_Initialize(): get tables collection"); err != nil {
+	if _, err = env.AttrGet(descriptor, C.OCI_DTYPE_CHDES,
+		C.OCI_ATTR_CHDES_TABLE_CHANGES, unsafe.Pointer(&tables),
+		"Message_Initialize(): get tables collection",
+	); err != nil {
 		return err
 	}
 
@@ -283,7 +280,8 @@ func (s *subscription) Register() error {
 	env := s.connection.environment
 	if ociHandleAlloc(unsafe.Pointer(env.handle), C.OCI_HTYPE_SUBSCRIPTION,
 		(*unsafe.Pointer)(unsafe.Pointer(&s.handle)),
-		"Subscription_Register(): allocate_handle"); err != nil {
+		"Subscription.Register[allocate handle]",
+	); err != nil {
 		return err
 	}
 
@@ -291,23 +289,29 @@ func (s *subscription) Register() error {
 	if s.port > 0 {
 		if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 			C.OCI_ATTR_SUBSCR_PORTNO,
-			unsafe.Pointer(&s.port), 0); err != nil {
-			return fmt.Errorf("Subscription_Register(): set port: %v", err)
+			unsafe.Pointer(&s.port), 0,
+			"Subscription.Register[set port]",
+		); err != nil {
+			return err
 		}
 	}
 
 	// set the timeout
 	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 		C.OCI_ATTR_SUBSCR_TIMEOUT,
-		unsafe.Pointer(&s.timeout), C.sizeof_ub4); err != nil {
-		return fmt.Errorf("Subscription_Register(): set timeout: %v", err)
+		unsafe.Pointer(&s.timeout), C.sizeof_ub4,
+		"Subscription.Register[set timeout]",
+	); err != nil {
+		return err
 	}
 
 	// set the name
 	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 		C.OCI_ATTR_SUBSCR_NAME,
-		unsafe.Pointer(&s.name[0]), len(s.name)); err != nil {
-		return fmt.Errorf("Subscription_Register(): set namespace: %v", err)
+		unsafe.Pointer(&s.name[0]), len(s.name),
+		"Subscription.Register[set namespace]",
+	); err != nil {
+		return err
 	}
 
 	// set the namespace
@@ -316,8 +320,10 @@ func (s *subscription) Register() error {
 	}
 	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 		C.OCI_ATTR_SUBSCR_NAMESPACE,
-		unsafe.Pointer(&s.namespace), C.sizeof_ub4); err != nil {
-		return fmt.Errorf("Subscription_Register(): set namespace: %v", err)
+		unsafe.Pointer(&s.namespace), C.sizeof_ub4,
+		"Subscription.Register[set namespace]",
+	); err != nil {
+		return err
 	}
 
 	// set the protocol
@@ -326,8 +332,10 @@ func (s *subscription) Register() error {
 	}
 	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 		C.OCI_ATTR_SUBSCR_RECPTPROTO,
-		unsafe.Pointer(&s.protocol), C.sizeof_ub4); err != nil {
-		return fmt.Errorf("Subscription_Register(): set protocol: %v", err)
+		unsafe.Pointer(&s.protocol), C.sizeof_ub4,
+		"Subscription.Register[set protocol]",
+	); err != nil {
+		return err
 	}
 
 	// set the callback, if applicable
@@ -335,10 +343,19 @@ func (s *subscription) Register() error {
 		log.Println("subscription: setting callback")
 		if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 			C.OCI_ATTR_SUBSCR_CALLBACK,
-			unsafe.Pointer(&C.callback), 0); err != nil {
-			//C.setSubsCallback(s.handle, env.errorHandle, C.callbackp),
-			return fmt.Errorf("Subscription_Register(): set callback: %v", err)
+			unsafe.Pointer(&C.goCallback), 0,
+			"Subscription.Register[set callback]",
+		); err != nil {
+			return err
 		}
+		/*
+			if err = env.CheckStatus(
+				C.setSubsCallback(s.handle, env.errorHandle),
+				"Subscription_Register(): setSubsCallback"); err != nil {
+				return fmt.Errorf("error: %v", err)
+			}
+		*/
+
 	}
 
 	// set whether or not rowids are desired
@@ -348,23 +365,35 @@ func (s *subscription) Register() error {
 	}
 	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 		C.OCI_ATTR_CHNF_ROWIDS,
-		unsafe.Pointer(&rowids), C.sizeof_ub4); err != nil {
-		return fmt.Errorf("Subscription_Register(): set rowids: %v", err)
+		unsafe.Pointer(&rowids), C.sizeof_ub4,
+		"Subscription.Register[set rowids]",
+	); err != nil {
+		return err
 	}
+
+	callbacksMu.Lock()
+	if callbacks == nil {
+		callbacks = make(map[uint8]*subscription, 1)
+	}
+	s.callbackID = uint8(len(callbacks))
+	callbacks[s.callbackID] = s
+	callbacksMu.Unlock()
 
 	// set the context for the callback
 	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
 		C.OCI_ATTR_SUBSCR_CTX,
-		unsafe.Pointer(s), C.sizeof_void); err != nil {
-		return fmt.Errorf("Subscription_Register(): set context: %v", err)
+		unsafe.Pointer(&s.callbackID), C.sizeof_void,
+		"Subscription.Register[set context]",
+	); err != nil {
+		return err
 	}
 
 	// set which operations are desired
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&s.operations), C.sizeof_ub4, C.OCI_ATTR_CHNF_OPERATIONS,
-			env.errorHandle),
-		"Subscription_Register(): set operations"); err != nil {
+	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		C.OCI_ATTR_CHNF_OPERATIONS, unsafe.Pointer(&s.operations),
+		C.sizeof_ub4,
+		"Subscription.Register[set operations]",
+	); err != nil {
 		return err
 	}
 
@@ -373,11 +402,10 @@ func (s *subscription) Register() error {
 	if s.qosReliable {
 		qos++
 	}
-	if err = env.CheckStatus(
-		C.OCIAttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
-			unsafe.Pointer(&qos), C.sizeof_ub4, C.OCI_ATTR_SUBSCR_QOSFLAGS,
-			env.errorHandle),
-		"Subscription_Register(): set qos reliability"); err != nil {
+	if err = env.AttrSet(unsafe.Pointer(s.handle), C.OCI_HTYPE_SUBSCRIPTION,
+		C.OCI_ATTR_SUBSCR_QOSFLAGS, unsafe.Pointer(&qos), C.sizeof_ub4,
+		"Subscription.Register[set qos reliability]",
+	); err != nil {
 		return err
 	}
 
@@ -387,7 +415,7 @@ func (s *subscription) Register() error {
 		C.OCISubscriptionRegister(s.connection.handle,
 			&s.handle, 1, env.errorHandle, C.OCI_DEFAULT),
 		//Py_END_ALLOW_THREADS
-		"Subscription_Register(): register"); err != nil {
+		"Subscription.Register[register]"); err != nil {
 		return err
 	}
 
@@ -516,8 +544,10 @@ func (s *subscription) RegisterQuery(qry string,
 	}
 	if err = env.AttrSet(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
 		C.OCI_ATTR_CHNF_REGHANDLE,
-		unsafe.Pointer(s.handle), 0); err != nil {
-		return fmt.Errorf("Subscription_RegisterQuery(): set subscription handle: %v", err)
+		unsafe.Pointer(s.handle), 0,
+		"Subscription.RegisterQuery[set subscription handle]",
+	); err != nil {
+		return err
 	}
 
 	// execute the query which registers it

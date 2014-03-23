@@ -289,7 +289,7 @@ func (cur *Cursor) setRowCount() error {
 		ctrace("%s.setRowCount statementType=%d", cur, cur.statementType)
 	}
 
-	var rowCount, x C.ub4
+	var rowCount C.ub4
 
 	if cur.statementType == C.OCI_STMT_SELECT {
 		cur.rowCount = 0
@@ -298,15 +298,9 @@ func (cur *Cursor) setRowCount() error {
 	} else if cur.statementType == C.OCI_STMT_INSERT ||
 		cur.statementType == C.OCI_STMT_UPDATE ||
 		cur.statementType == C.OCI_STMT_DELETE {
-		if CTrace {
-			ctrace("OCIAttrGet", cur.handle, "HTYPE_STMT", &rowCount, &x,
-				"ATTR_ROW_COUNT", cur.environment.errorHandle)
-		}
-		if err := cur.environment.CheckStatus(
-			C.OCIAttrGet(unsafe.Pointer(cur.handle),
-				C.OCI_HTYPE_STMT, unsafe.Pointer(&rowCount), &x,
-				C.OCI_ATTR_ROW_COUNT, cur.environment.errorHandle),
-			"SetRowCount"); err != nil {
+		if _, err := cur.AttrGet(C.OCI_ATTR_ROW_COUNT, unsafe.Pointer(&rowCount),
+			"SetRowCount",
+		); err != nil {
 			return err
 		}
 		cur.rowCount = int(rowCount)
@@ -329,14 +323,14 @@ func (cur Cursor) GetRowCount() int {
 
 // getErrorOffset gets the error offset on the error object, if applicable.
 func (cur *Cursor) getErrorOffset() int {
-	var offset, x C.ub4
-	if CTrace {
-		ctrace("getErrorOffset.OCIAttrGet", cur.handle, "HTYPE_STMT", &offset, &x,
-			"ATTR_PARSE_ERROR_OFFSET", cur.environment.errorHandle)
+	var offset C.ub4
+	if _, err := cur.environment.AttrGet(
+		unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
+		C.OCI_ATTR_PARSE_ERROR_OFFSET, unsafe.Pointer(&offset),
+		"getErrorOffset",
+	); err != nil {
+		log.Printf("error getting error offset: %v", err)
 	}
-	C.OCIAttrGet(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
-		unsafe.Pointer(&offset), &x,
-		C.OCI_ATTR_PARSE_ERROR_OFFSET, cur.environment.errorHandle)
 	return int(offset)
 }
 
@@ -348,6 +342,13 @@ func (cur *Cursor) setErrorOffset(err error) {
 	if x, ok := err.(*Error); ok {
 		x.Offset = cur.getErrorOffset()
 	}
+}
+
+// AttrGet is a convenience function calling
+// cur.environment.AttrGet(cur.handle, C.OCI_HTYPE_STMT, ...)
+func (cur *Cursor) AttrGet(key int, dst unsafe.Pointer, errText string) (int, error) {
+	return cur.environment.AttrGet(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
+		key, dst, errText)
 }
 
 // internalExecute performs the work of executing a cursor and
@@ -849,7 +850,7 @@ func (cur *Cursor) performBind() (err error) {
 		ctrace("bindVarsMap=%v", cur.bindVarsMap)
 	}
 	// set values and perform binds for all bind variables
-	if cur.bindVarsMap != nil {
+	if len(cur.bindVarsMap) > 0 {
 		for k, v := range cur.bindVarsMap {
 			if err = v.Bind(cur, k, 1); err != nil {
 				return err
@@ -868,7 +869,7 @@ func (cur *Cursor) performBind() (err error) {
 				}
 			}
 		*/
-	} else if cur.bindVarsArr != nil {
+	} else if len(cur.bindVarsMap) > 0 {
 		for i, v := range cur.bindVarsArr {
 			if err = v.Bind(cur, "", uint(i+1)); err != nil {
 				return err
@@ -1620,7 +1621,8 @@ func (cur *Cursor) internalFetch(numRows uint) error {
 	}
 	// debug("fetched, getting row count")
 	var rowCount int
-	if _, err = cur.environment.AttrGet(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
+	if _, err = cur.environment.AttrGet(
+		unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
 		C.OCI_ATTR_ROW_COUNT, unsafe.Pointer(&rowCount),
 		"internalFetch(): row count"); err != nil {
 		return err

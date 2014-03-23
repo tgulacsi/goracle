@@ -30,8 +30,9 @@ import (
 // Callback is the routine that is called when a callback needs to be invoked.
 //notification_callback (dvoid *ctx, OCISubscription *subscrhp, dvoid *payload, ub4 paylen, dvoid *desc, ub4 mode)
 
-//export callback
-func callback(ctx unsafe.Pointer, handle unsafe.Pointer, payload unsafe.Pointer, payloadLength C.ub4, descriptor unsafe.Pointer, mode C.ub4) C.ub4 {
+// We use an uint8 as ctx, which is a pointer to a map for the function to be executed.
+//export goCallback
+func goCallback(ctx unsafe.Pointer, handle unsafe.Pointer, payload unsafe.Pointer, payloadLength C.ub4, descriptor unsafe.Pointer, mode C.ub4) C.ub4 {
 	log.Printf("callback(ctx=%p handle=%p payload=%p len=%d descr=%p mode=%d)",
 		ctx, handle, payload, payloadLength, descriptor, mode)
 	env, err := NewEnvironment()
@@ -40,7 +41,18 @@ func callback(ctx unsafe.Pointer, handle unsafe.Pointer, payload unsafe.Pointer,
 		return 0
 	}
 
-	s := (*subscription)(unsafe.Pointer(ctx))
+	callbackP := (*uint8)(unsafe.Pointer(ctx))
+	if callbackP == nil {
+		log.Print("ERROR callbackID pointer is nil!")
+		return 0
+	}
+	callbacksMu.Lock()
+	s, ok := callbacks[*callbackP]
+	callbacksMu.Unlock()
+	if !ok {
+		log.Printf("ERROR callbackID %d not exists!", *callbackP)
+		return 0
+	}
 	if err = s.callbackHandler(env, descriptor); err != nil {
 		return 0
 	}

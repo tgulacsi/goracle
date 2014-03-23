@@ -187,16 +187,17 @@ func (env *Environment) ociDescrAlloc(dst *unsafe.Pointer, typ C.ub4, at string)
 
 //AttrSet sets an attribute on the given parent pointer
 func (env *Environment) AttrSet(parent unsafe.Pointer, parentTyp C.ub4,
-	key C.ub4, value unsafe.Pointer, valueLength int) error {
+	key C.ub4, value unsafe.Pointer, valueLength int, errText string) error {
 
 	if CTrace {
-		ctrace("AttrSet(parent=%p, parentTyp=%d, key=%d, value=%p, valueLength=%d)", parent, parentTyp, key, value, valueLength)
+		ctrace("AttrSet[%s](parent=%p, parentTyp=%d, key=%d, value=%p, valueLength=%d)",
+			errText, parent, parentTyp, key, value, valueLength)
 	}
 
 	return env.CheckStatus(C.OCIAttrSet(parent, parentTyp,
 		value, C.ub4(valueLength),
 		key, env.errorHandle),
-		"AttrSet")
+		errText)
 }
 
 // GetCharacterSetName retrieves the IANA character set name for the attribute.
@@ -337,13 +338,15 @@ func (env *Environment) AttrGet(parent unsafe.Pointer, parentType, key int,
 	dst unsafe.Pointer, errText string) (int, error) {
 	var osize C.ub4
 	if CTrace {
-		ctrace("OCIAttrGet(parent=%p, parentType=%d, dst=%p, osize=%p, key=%d, env=%p)",
-			parent, C.ub4(parentType), dst, &osize, C.ub4(key), env.errorHandle)
+		ctrace("OCIAttrGet[%s](parent=%p, parentType=%d, dst=%p, osize=%p, key=%d, env=%p)",
+			errText, parent, C.ub4(parentType), dst, &osize, C.ub4(key), env.errorHandle)
 	}
 	if err := env.CheckStatus(
 		C.OCIAttrGet(parent, C.ub4(parentType), dst, &osize, C.ub4(key),
-			env.errorHandle), errText); err != nil {
-		log.Printf("error gettint attr: %s", err)
+			env.errorHandle),
+		errText,
+	); err != nil {
+		log.Printf("error getting attr: %s", err)
 		return -1, err
 	}
 	return int(osize), nil

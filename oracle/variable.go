@@ -1044,14 +1044,16 @@ func (v *Variable) internalBind() (err error) {
 		if err = v.environment.AttrSet(
 			unsafe.Pointer(v.bindHandle), C.OCI_HTYPE_BIND,
 			C.OCI_ATTR_CHARSET_FORM, unsafe.Pointer(&v.typ.size),
-			C.sizeof_ub4); err != nil {
+			C.sizeof_ub4, "internalBind[set charset form]",
+		); err != nil {
 			return
 		}
 		// why do we set this here?
 		if err = v.environment.AttrSet(
 			unsafe.Pointer(v.bindHandle), C.OCI_HTYPE_BIND,
 			C.OCI_ATTR_MAXDATA_SIZE, unsafe.Pointer(&v.bufferSize),
-			C.sizeof_ub4); err != nil {
+			C.sizeof_ub4, "internalBind[set max data size]",
+		); err != nil {
 			return
 		}
 	}
@@ -1062,7 +1064,7 @@ func (v *Variable) internalBind() (err error) {
 		err = v.environment.AttrSet(
 			unsafe.Pointer(v.bindHandle), C.OCI_HTYPE_BIND,
 			C.OCI_ATTR_MAXDATA_SIZE, unsafe.Pointer(&v.typ.size),
-			C.sizeof_ub4)
+			C.sizeof_ub4, "internalBind[set max data size]")
 	}
 
 	return

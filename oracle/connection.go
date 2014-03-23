@@ -99,24 +99,24 @@ func (conn Connection) GetEnvironment() Environment {
 }
 
 // AttrSet sets an attribute on the connection identified by key setting value with valueLength length
-func (conn *Connection) AttrSet(key C.ub4, value unsafe.Pointer, valueLength int) error {
+func (conn *Connection) AttrSet(key C.ub4, value unsafe.Pointer, valueLength int, errText string) error {
 	return conn.environment.AttrSet(
 		unsafe.Pointer(conn.handle), C.OCI_HTYPE_SVCCTX,
-		key, value, valueLength)
+		key, value, valueLength, errText)
 }
 
 // ServerAttrSet sets an attribute on the server handle identified by key
-func (conn *Connection) ServerAttrSet(key C.ub4, value unsafe.Pointer, valueLength int) error {
+func (conn *Connection) ServerAttrSet(key C.ub4, value unsafe.Pointer, valueLength int, errText string) error {
 	return conn.environment.AttrSet(
 		unsafe.Pointer(conn.serverHandle), C.OCI_HTYPE_SERVER,
-		key, value, valueLength)
+		key, value, valueLength, errText)
 }
 
 // SessionAttrSet sets an attribute on the session handle identified by key
-func (conn *Connection) SessionAttrSet(key C.ub4, value unsafe.Pointer, valueLength int) error {
+func (conn *Connection) SessionAttrSet(key C.ub4, value unsafe.Pointer, valueLength int, errText string) error {
 	return conn.environment.AttrSet(
 		unsafe.Pointer(conn.sessionHandle), C.OCI_HTYPE_SESSION,
-		key, value, valueLength)
+		key, value, valueLength, errText)
 }
 
 // NewConnection creates a new connection and initializes the connection members.
@@ -194,8 +194,9 @@ func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string
 	// log.Printf("allocated service context handle")
 
 	// set attribute for server handle
-	if err = conn.AttrSet(C.OCI_ATTR_SERVER, unsafe.Pointer(conn.serverHandle), 0); err != nil {
-		setErrAt(err, "Connect[set server handle]")
+	if err = conn.AttrSet(C.OCI_ATTR_SERVER, unsafe.Pointer(conn.serverHandle), 0,
+		"Connect[set server handle]",
+	); err != nil {
 		return err
 	}
 
@@ -207,13 +208,15 @@ func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string
 		buffer[len(name)] = 0
 
 		if err = conn.ServerAttrSet(C.OCI_ATTR_INTERNAL_NAME,
-			unsafe.Pointer(&buffer[0]), len(name)); err != nil {
-			setErrAt(err, "Connect[set internal name]")
+			unsafe.Pointer(&buffer[0]), len(name),
+			"Connect[set internal name]",
+		); err != nil {
 			return err
 		}
 		if err = conn.ServerAttrSet(C.OCI_ATTR_EXTERNAL_NAME,
-			unsafe.Pointer(&buffer[0]), len(name)); err != nil {
-			setErrAt(err, "Connect[set external name]")
+			unsafe.Pointer(&buffer[0]), len(name),
+			"Connect[set external name]",
+		); err != nil {
 			return err
 		}
 	}
@@ -222,7 +225,8 @@ func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string
 	if err = ociHandleAlloc(unsafe.Pointer(conn.environment.handle),
 		C.OCI_HTYPE_SESSION,
 		(*unsafe.Pointer)(unsafe.Pointer(&conn.sessionHandle)),
-		"Connect[allocate session handle]"); err != nil {
+		"Connect[allocate session handle]",
+	); err != nil {
 		return err
 	}
 	// log.Printf("allocated session handle")
@@ -234,8 +238,9 @@ func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string
 		credentialType = C.OCI_CRED_RDBMS
 
 		if err = conn.SessionAttrSet(C.OCI_ATTR_USERNAME,
-			unsafe.Pointer(&buffer[0]), len(conn.username)); err != nil {
-			setErrAt(err, "Connect[set user name]")
+			unsafe.Pointer(&buffer[0]), len(conn.username),
+			"Connect[set user name]",
+		); err != nil {
 			return err
 		}
 		//fmt.Printf("set user name %s\n", buffer)
@@ -247,8 +252,9 @@ func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string
 		buffer[len(conn.password)] = 0
 		credentialType = C.OCI_CRED_RDBMS
 		if err = conn.SessionAttrSet(C.OCI_ATTR_PASSWORD,
-			unsafe.Pointer(&buffer[0]), len(conn.password)); err != nil {
-			setErrAt(err, "Connect[set password]")
+			unsafe.Pointer(&buffer[0]), len(conn.password),
+			"Connect[set password]",
+		); err != nil {
 			return err
 		}
 		//fmt.Printf("set password %s\n", buffer)
@@ -268,8 +274,9 @@ func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string
 
 	// set the session handle on the service context handle
 	if err = conn.AttrSet(C.OCI_ATTR_SESSION,
-		unsafe.Pointer(conn.sessionHandle), 0); err != nil {
-		setErrAt(err, "Connect[set session handle]")
+		unsafe.Pointer(conn.sessionHandle), 0,
+		"Connect[set session handle]",
+	); err != nil {
 		return err
 	}
 
@@ -365,16 +372,20 @@ func (conn *Connection) Begin(formatID int, transactionID, branchID string) erro
 			(*C.char)(unsafe.Pointer(&bID[0])), C.int(len(bID)))
 		if err = conn.environment.AttrSet(
 			unsafe.Pointer(transactionHandle), C.OCI_ATTR_XID,
-			C.OCI_HTYPE_TRANS, unsafe.Pointer(&xid), C.sizeof_XID); err != nil {
-			return errors.New("Connection.Begin(): set XID: " + err.Error())
+			C.OCI_HTYPE_TRANS, unsafe.Pointer(&xid), C.sizeof_XID,
+			"Connection.Begin[set XID]",
+		); err != nil {
+			return err
 		}
 	}
 
 	// associate the transaction with the connection
 	if err = conn.environment.AttrSet(
 		unsafe.Pointer(conn.handle), C.OCI_HTYPE_SVCCTX,
-		C.OCI_ATTR_TRANS, unsafe.Pointer(transactionHandle), 0); err != nil {
-		return errors.New("Connection.Begin(): associate transaction: " + err.Error())
+		C.OCI_ATTR_TRANS, unsafe.Pointer(transactionHandle), 0,
+		"Connection.Begin[associate transaction]",
+	); err != nil {
+		return err
 	}
 
 	// start the transaction
