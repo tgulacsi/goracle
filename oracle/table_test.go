@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/juju/errgo"
 )
 
 func TestTable(t *testing.T) {
@@ -57,16 +59,16 @@ func insert(t *testing.T, cur *Cursor,
 			VALUES (%d, %s, %3.3f, %s, '%s', TO_DATE('%s', 'YYYY-MM-DD HH24:MI:SS'))
 			`, small, bigint, notint, bigreal, text, date.Format("2006-01-02 15:04:05"))
 	if err := cur.Execute(qry, nil, nil); err != nil {
-		t.Errorf("cannot insert into tst_goracle (%q): %v", qry, err)
+		t.Errorf("cannot insert into tst_goracle (%q): %s", qry, errgo.Detauls(err))
 		return false
 	}
 	if err := cur.Execute("SELECT * FROM tst_goracle WHERE F_int = :1", []interface{}{small}, nil); err != nil {
-		t.Errorf("error selecting tst_goracle: %v", err)
+		t.Errorf("error selecting tst_goracle: %s", errgo.Details(err))
 		return false
 	}
 	row, err := cur.FetchOne()
 	if err != nil {
-		t.Errorf("error fetching row: %v", err)
+		t.Errorf("error fetching row: %s", errgo.Details(err))
 		return false
 	}
 	t.Logf("row: %#v", row)

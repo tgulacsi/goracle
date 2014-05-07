@@ -27,7 +27,11 @@ import "C"
 
 import (
 	"fmt"
+	"math"
+	"math/big"
 	"unsafe"
+
+	"github.com/juju/errgo"
 )
 
 var (
@@ -214,6 +218,10 @@ func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
 			}
 		}
 		return err
+	case big.Int:
+		return v.environment.numberFromText((&x).String(), v.getHandle(pos))
+	case *big.Int:
+		return v.environment.numberFromText(x.String(), v.getHandle(pos))
 
 	case float32:
 		return nfFloat(float64(x))
@@ -234,10 +242,13 @@ func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
 			}
 		}
 		return err
+	case big.Rat:
+		return v.environment.numberFromText((&x).FloatString(22), v.getHandle(pos))
+	case *big.Rat:
+		return v.environment.numberFromText(x.FloatString(22), v.getHandle(pos))
 
 	case string:
-		return v.environment.numberFromText(x,
-			v.getHandle(pos))
+		return v.environment.numberFromText(x, v.getHandle(pos))
 	case []string:
 		for i := range x {
 			if err = numberVarSetValue(v, pos+uint(i), x[i]); err != nil {
@@ -265,45 +276,70 @@ func numberVarGetValue(v *Variable, pos uint) (interface{}, error) {
 		// log.Printf("getting pos=%d from %+v", pos, v.dataInts)
 		return v.dataInts[pos], nil
 	}
-	if v.typ == NumberAsStringVarType {
-		buf := make([]byte, 200)
-		var size C.ub4
-		if err := v.environment.CheckStatus(
-			C.OCINumberToText(v.environment.errorHandle,
-				(*C.OCINumber)(v.getHandle(pos)),
-				(*C.oratext)(unsafe.Pointer(&v.environment.numberToStringFormatBuffer[0])),
-				C.ub4(len(v.environment.numberToStringFormatBuffer)), nil, 0,
-				&size, (*C.oratext)(&buf[0])),
-			"NumberToText"); err != nil {
-			return 0, err
-		}
-		return v.environment.FromEncodedString(buf[:int(size)]), nil
-	}
-	if CTrace {
-		ctrace("v=%s IsInteger?%s", v.typ, v.typ.IsInteger())
-	}
-	if v.typ.IsInteger() {
-		intVal := int64(0)
-		if err := v.environment.CheckStatus(
-			C.OCINumberToInt(v.environment.errorHandle,
-				(*C.OCINumber)(v.getHandle(pos)),
-				C.sizeof_long, C.OCI_NUMBER_SIGNED, unsafe.Pointer(&intVal)),
-			"numberToInt"); err != nil {
-			return -1, err
-		}
+
+	num := (*C.OCINumber)(v.getHandle(pos))
+	if v.typ != NumberAsStringVarType {
 		if v.typ == BooleanVarType {
-			return intVal > 0, nil
+			intVal, err := numAsInt(v, num)
+			return intVal > 0, errgo.Notef(err, "want boolean")
 		}
-		return intVal, nil
+		floatVal := float64(0)
+		err := v.environment.CheckStatus(
+			C.OCINumberToReal(v.environment.errorHandle,
+				num,
+				C.sizeof_double, unsafe.Pointer(&floatVal)),
+			"numberToFloat")
+		if err != nil {
+			return nil, errgo.Notef(err, "want float")
+		}
+		if !v.typ.IsInteger() {
+			return floatVal, nil
+		}
+		if floatVal < math.MaxInt32 && floatVal > math.MinInt32 {
+			return numAsInt(v, num)
+		}
 	}
 
-	floatVal := float64(0)
-	err := v.environment.CheckStatus(
-		C.OCINumberToReal(v.environment.errorHandle,
+	buf := make([]byte, 200)
+	var size C.ub4
+	if err := v.environment.CheckStatus(
+		C.OCINumberToText(v.environment.errorHandle,
 			(*C.OCINumber)(v.getHandle(pos)),
-			C.sizeof_double, unsafe.Pointer(&floatVal)),
-		"numberToFloat")
-	return floatVal, err
+			(*C.oratext)(unsafe.Pointer(&v.environment.numberToStringFormatBuffer[0])),
+			C.ub4(len(v.environment.numberToStringFormatBuffer)), nil, 0,
+			&size, (*C.oratext)(&buf[0])),
+		"NumberToText"); err != nil {
+		return 0, errgo.Notef(err, "want string")
+	}
+	numS := v.environment.FromEncodedString(buf[:int(size)])
+	if v.typ == NumberAsStringVarType {
+		return numS, nil
+	}
+	var err error
+	if v.typ.IsInteger() {
+		bigInt, ok := big.NewInt(0).SetString(numS, 10)
+		if !ok {
+			err = errgo.Newf("%q not number", numS)
+		}
+		return bigInt, err
+	}
+	bigRat, ok := big.NewRat(0, 0).SetString(numS)
+	if !ok {
+		err = errgo.Newf("%q not real", numS)
+	}
+	return bigRat, err
+}
+
+func numAsInt(v *Variable, num *C.OCINumber) (intVal int32, err error) {
+	if err = v.environment.CheckStatus(
+		C.OCINumberToInt(v.environment.errorHandle,
+			//(*C.OCINumber)(v.getHandle(pos)),
+			num,
+			4, C.OCI_NUMBER_SIGNED, unsafe.Pointer(&intVal)),
+		"numberToInt"); err != nil {
+		return -1, err
+	}
+	return
 }
 
 func init() {

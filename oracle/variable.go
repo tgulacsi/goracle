@@ -33,6 +33,8 @@ import (
 	"reflect"
 	"time"
 	"unsafe"
+
+	"github.com/juju/errgo"
 )
 
 var (
@@ -1136,7 +1138,7 @@ func (v *Variable) getSingleValue(arrayPos uint) (interface{}, error) {
 
 	// ensure we do not exceed the number of allocated elements
 	if arrayPos >= v.allocatedElements {
-		return nil, errors.New("Variable_GetSingleValue: array size exceeded")
+		return nil, errgo.New("Variable_GetSingleValue: array size exceeded")
 	}
 
 	// check for a NULL value
@@ -1151,7 +1153,7 @@ func (v *Variable) getSingleValue(arrayPos uint) (interface{}, error) {
 
 	// check for truncation or other problems on retrieve
 	if err := v.verifyFetch(arrayPos); err != nil {
-		return nil, err
+		return nil, errgo.Mask(err)
 	}
 
 	// calculate value to return
@@ -1171,7 +1173,7 @@ func (v *Variable) getSingleValueInto(dest *interface{}, arrayPos uint) error {
 
 	// ensure we do not exceed the number of allocated elements
 	if arrayPos >= v.allocatedElements {
-		return errors.New("Variable_GetSingleValue: array size exceeded")
+		return errgo.New("Variable_GetSingleValue: array size exceeded")
 	}
 
 	// check for a NULL value
@@ -1192,15 +1194,15 @@ func (v *Variable) getSingleValueInto(dest *interface{}, arrayPos uint) error {
 
 	// check for truncation or other problems on retrieve
 	if err := v.verifyFetch(arrayPos); err != nil {
-		return err
+		return errgo.Mask(err)
 	}
 
 	// calculate value to return
 	err := v.typ.getValueInto(dest, v, arrayPos)
 	if err != nil {
-		log.Printf("%s.getSingleValueInto dest=%+v err=%s", v.typ, *dest, err)
+		log.Printf("%s.getSingleValueInto dest=%+v(%T) err=%s", v.typ, *dest, *dest, err)
 	}
-	return err
+	return errgo.Notef(err, "dest=%#v(%T)", *dest, *dest)
 }
 
 // getArrayValue returns the value of the variable as an array.
