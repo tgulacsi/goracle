@@ -59,7 +59,7 @@ func insert(t *testing.T, cur *Cursor,
 			VALUES (%d, %s, %3.3f, %s, '%s', TO_DATE('%s', 'YYYY-MM-DD HH24:MI:SS'))
 			`, small, bigint, notint, bigreal, text, date.Format("2006-01-02 15:04:05"))
 	if err := cur.Execute(qry, nil, nil); err != nil {
-		t.Errorf("cannot insert into tst_goracle (%q): %s", qry, errgo.Detauls(err))
+		t.Errorf("cannot insert into tst_goracle (%q): %s", qry, errgo.Details(err))
 		return false
 	}
 	if err := cur.Execute("SELECT * FROM tst_goracle WHERE F_int = :1", []interface{}{small}, nil); err != nil {

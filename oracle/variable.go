@@ -27,12 +27,13 @@ limitations under the License.
 import "C"
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"reflect"
 	"time"
 	"unsafe"
+
+	"github.com/juju/errgo/errors"
 
 	"github.com/juju/errgo"
 )
@@ -115,7 +116,7 @@ func (cur *Cursor) NewVariable(numElements uint, varType *VariableType, size uin
 	// perform extended initialization
 	if v.typ.initialize != nil {
 		if err = v.typ.initialize(v, cur); err != nil {
-			err = fmt.Errorf("error initializing %s: %s", v, err)
+			err = errgo.Newf("error initializing %s: %s", v, err)
 			return
 		}
 	}
@@ -159,11 +160,11 @@ type VariableType struct {
 func (t *VariableType) getValueInto(dest interface{}, v *Variable, pos uint) error {
 	rval := reflect.ValueOf(dest)
 	if rval.Kind() != reflect.Ptr {
-		return fmt.Errorf("%s.getValueInto: a pointer is needed, got %T", v, dest)
+		return errgo.Newf("%s.getValueInto: a pointer is needed, got %T", v, dest)
 	}
 	val, err := t.getValue(v, pos)
 	if err != nil {
-		return err
+		return errors.Mask(err)
 	}
 	reflect.ValueOf(dest).Elem().Set(reflect.ValueOf(val))
 	// log.Printf("%s.getValueInto dest=%+v err=%s", t, *dest, err)
@@ -201,7 +202,7 @@ func (cur *Cursor) NewVar(value interface{}, /*inconverter, outconverter, typena
 	}
 	varType, size, numElements, err := VarTypeByValue(val)
 	if err != nil {
-		return nil, err
+		return nil, errors.Mask(err)
 	}
 	if varType.isVariableLength && size == 0 {
 		size = varType.size
@@ -278,10 +279,12 @@ func (env *Environment) varTypeByOracleDescriptor(param *C.OCIParam) (*VariableT
 	if _, err := env.AttrGet(unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 		C.OCI_ATTR_DATA_TYPE, unsafe.Pointer(&dataType),
 		"param dataType"); err != nil {
-		return nil, err
+		return nil, errors.Mask(
+
+			// retrieve character set form of the parameter
+			err)
 	}
 
-	// retrieve character set form of the parameter
 	if dataType != C.SQLT_CHR && dataType != C.SQLT_AFC &&
 		dataType != C.SQLT_CLOB {
 		charsetForm = C.SQLCS_IMPLICIT
@@ -289,7 +292,7 @@ func (env *Environment) varTypeByOracleDescriptor(param *C.OCIParam) (*VariableT
 		if _, err := env.AttrGet(unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 			C.OCI_ATTR_CHARSET_FORM, unsafe.Pointer(&charsetForm),
 			"param charsetForm"); err != nil {
-			return nil, err
+			return nil, errors.Mask(err)
 		}
 	}
 
@@ -524,7 +527,7 @@ func VarTypeByValue(data interface{}) (vt *VariableType, size uint, numElements 
 		return x.GetVarType(), 0, 0, nil
 	}
 
-	return nil, 0, 0, fmt.Errorf("unhandled data type %T", data)
+	return nil, 0, 0, errgo.Newf("unhandled data type %T", data)
 }
 
 // Return a variable type given an Oracle data type or NULL if the Oracle
@@ -569,7 +572,7 @@ func varTypeByOraDataType(oracleDataType C.ub2, charsetForm C.ub1) (*VariableTyp
 		return FloatVarType, nil
 	}
 	log.Printf("unhandled data type: %d", oracleDataType)
-	return nil, fmt.Errorf("TypeByOracleDataType: unhandled data type %d",
+	return nil, errgo.Newf("TypeByOracleDataType: unhandled data type %d",
 		oracleDataType)
 }
 
@@ -607,7 +610,7 @@ func varTypeByOracleDescriptor(param *C.OCIParam, environment *Environment) (*Va
 // Make the variable an array, ensuring that the type supports arrays.
 func (v *Variable) makeArray() error {
 	if !v.typ.canBeInArray {
-		return fmt.Errorf("type does not support arrays")
+		return errgo.Newf("type does not support arrays")
 	}
 	v.isArray = true
 	return nil
@@ -677,13 +680,16 @@ func NewVariableByValue(cur *Cursor, value interface{}, numElements uint) (v *Va
 func (cur *Cursor) NewVariableArrayByValue(element interface{}, numElements uint) (*Variable, error) {
 	varType, size, _, err := VarTypeByValue(element)
 	if err != nil {
-		return nil, err
+		return nil, errors.Mask(err)
 	}
 	v, err := cur.NewVariable(numElements, varType, size)
 	if err != nil {
-		return nil, err
+		return nil, errors.Mask(
+
+			//v.makeArray()
+			err)
 	}
-	//v.makeArray()
+
 	return v, nil
 }
 
@@ -870,13 +876,13 @@ func (cur *Cursor) variableDefineHelper(param *C.OCIParam, position, numElements
 	//log.Printf("varType=%#v size=%d", varType, size)
 	v, err = cur.NewVariable(numElements, varType, uint(size))
 	if err != nil {
-		return nil, fmt.Errorf("error creating variable: %s", err)
+		return nil, errgo.Newf("error creating variable: %s", err)
 	}
 
 	// call the procedure to set values prior to define
 	if v.typ.preDefine != nil {
 		if err = v.typ.preDefine(v, param); err != nil {
-			return nil, fmt.Errorf("error with preDefine(%s): %s", v, err)
+			return nil, errgo.Newf("error with preDefine(%s): %s", v, err)
 		}
 	}
 
@@ -896,13 +902,13 @@ func (cur *Cursor) variableDefineHelper(param *C.OCIParam, position, numElements
 			C.sb4(v.bufferSize), v.typ.oracleType,
 			indic, aL, rC, C.OCI_DEFAULT),
 		"define"); err != nil {
-		return nil, fmt.Errorf("error defining: %s", err)
+		return nil, errgo.Newf("error defining: %s", err)
 	}
 
 	// call the procedure to set values after define
 	if v.typ.postDefine != nil {
 		if err = v.typ.postDefine(v); err != nil {
-			return nil, fmt.Errorf("error with postDefine(%s): %s", v, err)
+			return nil, errgo.Newf("error with postDefine(%s): %s", v, err)
 		}
 	}
 
@@ -1200,7 +1206,7 @@ func (v *Variable) getSingleValueInto(dest *interface{}, arrayPos uint) error {
 	// calculate value to return
 	err := v.typ.getValueInto(dest, v, arrayPos)
 	if err != nil {
-		log.Printf("%s.getSingleValueInto dest=%+v(%T) err=%s", v.typ, *dest, *dest, err)
+		log.Printf("%s.getSingleValueInto dest=%T(%+v) err=%s", v.typ, *dest, *dest, errgo.Details(err))
 	}
 	return errgo.Notef(err, "dest=%#v(%T)", *dest, *dest)
 }
@@ -1213,7 +1219,7 @@ func (v *Variable) getArrayValue(numElements uint) (interface{}, error) {
 
 	for i := uint(0); i < numElements; i++ {
 		if singleValue, err = v.getSingleValue(i); err != nil {
-			return nil, err
+			return nil, errors.Mask(err)
 		}
 		value[i] = singleValue
 	}
@@ -1228,7 +1234,7 @@ func (v *Variable) getArrayValueInto(dest interface{}, numElements uint) error {
 	if !ok {
 		val, ok := dest.([]interface{})
 		if !ok {
-			return fmt.Errorf("getArrayValueInto requires *[]interface{}, got %T", dest)
+			return errgo.Newf("getArrayValueInto requires *[]interface{}, got %T", dest)
 		}
 		valp = &val
 	}
@@ -1241,7 +1247,7 @@ func (v *Variable) getArrayValueInto(dest interface{}, numElements uint) error {
 
 	for i := uint(0); i < numElements; i++ {
 		if err = v.getSingleValueInto(&(*valp)[i], i); err != nil {
-			return err
+			return errors.Mask(err)
 		}
 	}
 
@@ -1317,7 +1323,7 @@ func (v *Variable) setArrayValue(value []interface{}) error {
 	var err error
 	for i, elt := range value {
 		if err = v.setSingleValue(uint(i), elt); err != nil {
-			return err
+			return errors.Mask(err)
 		}
 	}
 	return nil
@@ -1326,7 +1332,7 @@ func (v *Variable) setArrayValue(value []interface{}) error {
 // setArrayReflectValue sets all of the array values for the variable, using reflection
 func (v *Variable) setArrayReflectValue(value reflect.Value) error {
 	if value.Kind() != reflect.Slice {
-		return fmt.Errorf("Variable_setArrayReflectValue needs slice, not %s!", value.Kind())
+		return errgo.Newf("Variable_setArrayReflectValue needs slice, not %s!", value.Kind())
 	}
 	numElements := uint(value.Len())
 	if numElements > v.allocatedElements {
@@ -1340,7 +1346,7 @@ func (v *Variable) setArrayReflectValue(value reflect.Value) error {
 		//for i, elt := range value {
 		if err = v.setSingleValue(i,
 			value.Index(int(i)).Interface()); err != nil {
-			return err
+			return errors.Mask(err)
 		}
 	}
 	return nil
@@ -1386,7 +1392,7 @@ func (cur *Cursor) getPtrValues() error {
 			val, err := v.GetValue(0)
 			debug("%s setting %v to %v %v", v, v.destination, val, err)
 			if err != nil {
-				return fmt.Errorf("error getting value of %s: %v", v, err)
+				return errgo.Notef(err, "error getting value of %s", v)
 			}
 			if val == nil {
 				v.destination.Elem().Set(reflect.Zero(v.destination.Elem().Type()))
@@ -1400,7 +1406,7 @@ func (cur *Cursor) getPtrValues() error {
 			val, err := v.GetValue(0)
 			debug("%s setting %v to %v %v", v, v.destination, val, err)
 			if err != nil {
-				return fmt.Errorf("error getting value of %s(%s): %v", k, v, err)
+				return errgo.Notef(err, "error getting value of %s(%s)", k, v)
 			}
 			if val == nil {
 				v.destination.Elem().Set(reflect.Zero(v.destination.Elem().Type()))
@@ -1438,7 +1444,7 @@ func (targetVar *Variable) externalCopy(sourceVar *Variable, sourcePos, targetPo
 		targetVar.indicator[targetPos] = C.OCI_IND_NOTNULL
 		var err error
 		if err = sourceVar.verifyFetch(sourcePos); err != nil {
-			return err
+			return errors.Mask(err)
 		}
 		if targetVar.actualLength[targetPos] > 0 {
 			targetVar.actualLength[targetPos] =

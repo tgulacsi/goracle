@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"math/big"
 	"unsafe"
@@ -86,16 +87,19 @@ func numberVarPreDefine(v *Variable, param *C.OCIParam) error {
 		unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 		C.OCI_ATTR_SCALE, unsafe.Pointer(&scale),
 		"numberVarPreDefine: scale"); err != nil {
-		return err
+		return errgo.Mask(err)
 	}
 	if _, err := v.environment.AttrGet(
 		unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 		C.OCI_ATTR_PRECISION, unsafe.Pointer(&precision),
 		"numberVarPreDefine(): precision"); err != nil {
-		return err
+		return errgo.Mask(
+
+			// log.Printf("numberVarPreDefine typ=%s scale=%d precision=%d", v.typ,
+			// 	scale, precision)
+			err)
 	}
-	// log.Printf("numberVarPreDefine typ=%s scale=%d precision=%d", v.typ,
-	// 	scale, precision)
+
 	if v.typ == nil {
 		v.typ = FloatVarType
 	}
@@ -162,7 +166,7 @@ func (env *Environment) numberFromText(value string, dst unsafe.Pointer) error {
 
 // Set the value of the variable.
 func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
-	debug("numberVarSetValue(typ=%s, pos=%d len=(%d), value=%+v (%T))", v.typ,
+	debug("numberVarSetValue(typ=%s, pos=%d len=(%d), value=%T(%+v))", v.typ,
 		pos, len(v.dataBytes), value, value)
 	nfInt := func(intVal int64) error {
 		if v.dataInts != nil {
@@ -196,7 +200,7 @@ func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
 	case []int32:
 		for i := range x {
 			if err = numberVarSetValue(v, pos+uint(i), x[i]); err != nil {
-				return err
+				return errgo.Mask(err)
 			}
 		}
 		return err
@@ -214,7 +218,7 @@ func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
 	case []int64:
 		for i := range x {
 			if err = numberVarSetValue(v, pos+uint(i), x[i]); err != nil {
-				return err
+				return errgo.Mask(err)
 			}
 		}
 		return err
@@ -228,7 +232,7 @@ func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
 	case []float32:
 		for i := range x {
 			if err = numberVarSetValue(v, pos+uint(i), x[i]); err != nil {
-				return err
+				return errgo.Mask(err)
 			}
 		}
 		return err
@@ -238,7 +242,7 @@ func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
 	case []float64:
 		for i := range x {
 			if err = numberVarSetValue(v, pos+uint(i), x[i]); err != nil {
-				return err
+				return errgo.Mask(err)
 			}
 		}
 		return err
@@ -252,7 +256,7 @@ func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
 	case []string:
 		for i := range x {
 			if err = numberVarSetValue(v, pos+uint(i), x[i]); err != nil {
-				return err
+				return errgo.Mask(err)
 			}
 		}
 		return err
@@ -262,7 +266,7 @@ func numberVarSetValue(v *Variable, pos uint, value interface{}) error {
 			return v.environment.numberFromText(x.String(),
 				v.getHandle(pos))
 		}
-		return fmt.Errorf("required some kind of int, got %T", value)
+		return errgo.Newf("required some kind of int, got %T", value)
 	}
 }
 
@@ -300,15 +304,21 @@ func numberVarGetValue(v *Variable, pos uint) (interface{}, error) {
 		}
 	}
 
-	buf := make([]byte, 200)
+	buf := make([]byte, 64)
 	var size C.ub4
 	if err := v.environment.CheckStatus(
 		C.OCINumberToText(v.environment.errorHandle,
-			(*C.OCINumber)(v.getHandle(pos)),
+			num,
 			(*C.oratext)(unsafe.Pointer(&v.environment.numberToStringFormatBuffer[0])),
 			C.ub4(len(v.environment.numberToStringFormatBuffer)), nil, 0,
 			&size, (*C.oratext)(&buf[0])),
-		"NumberToText"); err != nil {
+		"NumberToText",
+	); err != nil {
+		log.Printf("format=%q len=%d num=%p (%d) size=%p buf=%p",
+			v.environment.numberToStringFormatBuffer,
+			len(v.environment.numberToStringFormatBuffer),
+			num, *((*byte)(unsafe.Pointer(num))),
+			&size, &buf[0])
 		return 0, errgo.Notef(err, "want string")
 	}
 	numS := v.environment.FromEncodedString(buf[:int(size)])
@@ -337,7 +347,7 @@ func numAsInt(v *Variable, num *C.OCINumber) (intVal int32, err error) {
 			num,
 			4, C.OCI_NUMBER_SIGNED, unsafe.Pointer(&intVal)),
 		"numberToInt"); err != nil {
-		return -1, err
+		return -1, errgo.Mask(err)
 	}
 	return
 }

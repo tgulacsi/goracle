@@ -21,6 +21,8 @@ import (
 	"log"
 	"testing"
 	"time"
+
+	"github.com/juju/errgo"
 )
 
 /*
@@ -182,7 +184,7 @@ func TestOutBinds(t *testing.T) {
 			continue
 		}
 		if err = out.GetValueInto(&tt.outVal, 0); err != nil {
-			t.Errorf("%d. error getting value: %s", i, err)
+			t.Errorf("%d. error getting value: %s", i, errgo.Details(err))
 			continue
 		}
 		t.Logf("%d. out:%s %v", i, out, tt.outVal)
