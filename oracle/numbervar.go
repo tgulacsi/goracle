@@ -28,8 +28,8 @@ import "C"
 import (
 	"fmt"
 	"log"
-	"math"
 	"math/big"
+	"strings"
 	"unsafe"
 
 	"github.com/juju/errgo"
@@ -281,29 +281,7 @@ func numberVarGetValue(v *Variable, pos uint) (interface{}, error) {
 		return v.dataInts[pos], nil
 	}
 
-	var floatVal float64
 	num := (*C.OCINumber)(v.getHandle(pos))
-	if v.typ != NumberAsStringVarType {
-		if v.typ == BooleanVarType {
-			intVal, err := numAsInt(v, num)
-			return intVal > 0, errgo.Notef(err, "want boolean")
-		}
-		err := v.environment.CheckStatus(
-			C.OCINumberToReal(v.environment.errorHandle,
-				num,
-				C.sizeof_double, unsafe.Pointer(&floatVal)),
-			"numberToFloat")
-		if err != nil {
-			return nil, errgo.Notef(err, "want float")
-		}
-		if !v.typ.IsInteger() {
-			return floatVal, nil
-		}
-		if floatVal < math.MaxInt32 && floatVal > math.MinInt32 {
-			return numAsInt(v, num)
-		}
-	}
-
 	buf := make([]byte, 64)
 	size := C.ub4(len(buf))
 	if err := v.environment.CheckStatus(
@@ -314,31 +292,32 @@ func numberVarGetValue(v *Variable, pos uint) (interface{}, error) {
 			&size, (*C.oratext)(&buf[0])),
 		"NumberToText",
 	); err != nil {
+		var floatVal float64
+		_ = v.environment.CheckStatus(
+			C.OCINumberToReal(v.environment.errorHandle,
+				num,
+				C.sizeof_double, unsafe.Pointer(&floatVal)),
+			"numberToFloat")
 		log.Printf("floatVal=%f format=%q len=%d num=%p (%d) size=%p buf=%p",
 			floatVal,
 			v.environment.numberToStringFormatBuffer,
 			len(v.environment.numberToStringFormatBuffer),
 			num, *((*byte)(unsafe.Pointer(num))),
 			&size, &buf[0])
-		return 0, errgo.Notef(err, "want string")
+		return 0, errgo.Notef(err, "want string (%f)", floatVal)
 	}
-	numS := v.environment.FromEncodedString(buf[:int(size)])
+	numS := strings.Replace(
+		v.environment.FromEncodedString(buf[:int(size)]),
+		",", ".", -1)
 	if v.typ == NumberAsStringVarType {
 		return numS, nil
 	}
-	var err error
-	if v.typ.IsInteger() {
-		bigInt, ok := big.NewInt(0).SetString(numS, 10)
-		if !ok {
-			err = errgo.Newf("%q not number", numS)
-		}
-		return bigInt, err
+
+	if len(numS) <= 9 && strings.IndexByte(numS, '.') < 0 {
+		intVal, err := numAsInt(v, num)
+		return intVal, errgo.Mask(err)
 	}
-	bigRat, ok := big.NewRat(0, 0).SetString(numS)
-	if !ok {
-		err = errgo.Newf("%q not real", numS)
-	}
-	return bigRat, err
+	return numS, nil
 }
 
 func numAsInt(v *Variable, num *C.OCINumber) (intVal int32, err error) {

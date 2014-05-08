@@ -24,6 +24,8 @@ import (
 	"github.com/juju/errgo"
 )
 
+const tbl = "tst_goracle_oracle"
+
 func TestTable(t *testing.T) {
 	conn := getConnection(t)
 	if !conn.IsConnected() {
@@ -32,15 +34,15 @@ func TestTable(t *testing.T) {
 	defer conn.Close()
 	cur := conn.NewCursor()
 	defer cur.Close()
-	if err := cur.Execute(`CREATE TABLE tst_goracle (
+	if err := cur.Execute(`CREATE TABLE `+tbl+` (
 			F_int NUMBER(10,0), F_bigint NUMBER(20),
 			F_real NUMBER(6,3), F_bigreal NUMBER(20,10),
 			F_text VARCHAR2(1000), F_date DATE
 		)`, nil, nil); err != nil {
-		t.Skipf("Skipping table test, as cannot create tst_goracle: %v", err)
+		t.Skipf("Skipping table test, as cannot create "+tbl+": %v", err)
 		return
 	}
-	defer cur.Execute("DROP TABLE tst_goracle", nil, nil)
+	defer cur.Execute("DROP TABLE "+tbl, nil, nil)
 
 	insert(t, cur, 1, "1234567890123456", 123.456,
 		"123456789.123456789", "int64", time.Now())
@@ -54,16 +56,16 @@ func insert(t *testing.T, cur *Cursor,
 	notint float64, bigreal string,
 	text string, date time.Time,
 ) bool {
-	qry := fmt.Sprintf(`INSERT INTO tst_goracle
+	qry := fmt.Sprintf(`INSERT INTO `+tbl+`
 			(F_int, F_bigint, F_real, F_bigreal, F_text, F_date)
 			VALUES (%d, %s, %3.3f, %s, '%s', TO_DATE('%s', 'YYYY-MM-DD HH24:MI:SS'))
 			`, small, bigint, notint, bigreal, text, date.Format("2006-01-02 15:04:05"))
 	if err := cur.Execute(qry, nil, nil); err != nil {
-		t.Errorf("cannot insert into tst_goracle (%q): %s", qry, errgo.Details(err))
+		t.Errorf("cannot insert into "+tbl+" (%q): %s", qry, errgo.Details(err))
 		return false
 	}
-	if err := cur.Execute("SELECT * FROM tst_goracle WHERE F_int = :1", []interface{}{small}, nil); err != nil {
-		t.Errorf("error with SELECT * FROM tst_goracle WHERE F_int = %d: %s", small, errgo.Details(err))
+	if err := cur.Execute("SELECT * FROM "+tbl+" WHERE F_int = :1", []interface{}{small}, nil); err != nil {
+		t.Errorf("error with SELECT * FROM "+tbl+" WHERE F_int = %d: %s", small, errgo.Details(err))
 		return false
 	}
 	row, err := cur.FetchOne()

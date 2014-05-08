@@ -26,19 +26,21 @@ import (
 	"github.com/juju/errgo"
 )
 
+const tbl = "tst_goracle_godrv"
+
 func TestTable(t *testing.T) {
 	conn := getConnection(t)
 	defer conn.Close()
-	conn.Exec("DROP TABLE tst_goracle")
-	if _, err := conn.Exec(`CREATE TABLE tst_goracle (
+	conn.Exec("DROP TABLE " + tbl)
+	if _, err := conn.Exec(`CREATE TABLE ` + tbl + ` (
 			F_int NUMBER(10,0), F_bigint NUMBER(20),
 			F_real NUMBER(6,3), F_bigreal NUMBER(20,10),
 			F_text VARCHAR2(1000), F_date DATE
 		)`); err != nil {
-		t.Skipf("Skipping table test, as cannot create tst_goracle: %v", err)
+		t.Skipf("Skipping table test, as cannot create "+tbl+": %v", err)
 		return
 	}
-	defer conn.Exec("DROP TABLE tst_goracle")
+	defer conn.Exec("DROP TABLE " + tbl)
 	tx, err := conn.Begin()
 	if err != nil {
 		t.Errorf("cannot start transaction: %v", err)
@@ -58,36 +60,36 @@ func insert(t *testing.T, conn *sql.Tx,
 	notint float64, bigreal string,
 	text string, date time.Time,
 ) bool {
-	qry := fmt.Sprintf(`INSERT INTO tst_goracle
+	date = date.Round(time.Second)
+	qry := fmt.Sprintf(`INSERT INTO `+tbl+`
 			(F_int, F_bigint, F_real, F_bigreal, F_text, F_date)
 			VALUES (%d, %s, %3.3f, %s, '%s', TO_DATE('%s', 'YYYY-MM-DD HH24:MI:SS'))
 			`, small, bigint, notint, bigreal, text, date.Format("2006-01-02 15:04:05"))
 	if _, err := conn.Exec(qry); err != nil {
-		t.Errorf("cannot insert into tst_goracle (%q): %v", qry, err)
+		t.Errorf("cannot insert into "+tbl+" (%q): %v", qry, err)
 		return false
 	}
-	row := conn.QueryRow("SELECT * FROM tst_goracle WHERE F_int = :1", small)
+	row := conn.QueryRow("SELECT * FROM "+tbl+" WHERE F_int = :1", small)
 	var (
 		smallO             int
 		bigintO            big.Int
-		bigintI, bigrealI  interface{}
 		notintO            float64
 		bigrealF, bigrealO big.Rat
-		//bigrealS           string
-		textO string
-		dateO time.Time
+		bigintS, bigrealS  string
+		textO              string
+		dateO              time.Time
 	)
-	if err := row.Scan(&smallO, &bigintI, &notintO, &bigrealI, &textO, &dateO); err != nil {
+	if err := row.Scan(&smallO, &bigintS, &notintO, &bigrealS, &textO, &dateO); err != nil {
 		t.Errorf("error scanning row[%d]: %v", small, errgo.Details(err))
 		return false
 	}
 	t.Logf("row: small=%d big=%s notint=%f bigreal=%s text=%q date=%s",
-		smallO, bigintI, notintO, bigrealI, textO, dateO)
+		smallO, bigintS, notintO, bigrealS, textO, dateO)
 
 	if smallO != small {
 		t.Errorf("small mismatch: got %d, awaited %d.", smallO, small)
 	}
-	(&bigintO).Set(bigintI.(*big.Int))
+	(&bigintO).SetString(bigintS, 10)
 	if bigintO.String() != bigint {
 		t.Errorf("bigint mismatch: got %d, awaited %d.", bigintO, bigint)
 	}
@@ -95,23 +97,14 @@ func insert(t *testing.T, conn *sql.Tx,
 		t.Errorf("noting mismatch: got %d, awaited %d.", notintO, notint)
 	}
 	(&bigrealF).SetString(bigreal)
-	switch x := bigrealI.(type) {
-	case float64:
-		(&bigrealO).SetFloat64(x)
-	case string:
-		(&bigrealO).SetString(x)
-	case *big.Rat:
-		(&bigrealO).Set(x)
-	default:
-		(&bigrealO).SetString(fmt.Sprintf("%s", bigrealI))
-	}
+	(&bigrealO).SetString(bigrealS)
 	if (&bigrealO).Cmp(&bigrealF) != 0 {
 		t.Errorf("bigreal mismatch: got %s, awaited %s.", (&bigrealO), (&bigrealF))
 	}
 	if textO != text {
 		t.Errorf("text mismatch: got %q, awaited %q.", textO, text)
 	}
-	if !dateO.Equal(date.Round(time.Second)) {
+	if !dateO.Equal(date) {
 		t.Errorf("date mismatch: got %s, awaited %s.", dateO, date.Round(time.Second))
 	}
 
