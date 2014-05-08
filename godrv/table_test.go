@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/juju/errgo"
 )
 
 func TestTable(t *testing.T) {
@@ -44,7 +46,7 @@ func TestTable(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	insert(t, tx, 1234567890, "1234567890123456", 123.456,
+	insert(t, tx, 1, "1234567890123456", 123.456,
 		"123456789.123456789", "int64", time.Now())
 
 	insert(t, tx, 2, "22345678901234567890", 223.456,
@@ -67,7 +69,7 @@ func insert(t *testing.T, conn *sql.Tx,
 	row := conn.QueryRow("SELECT * FROM tst_goracle WHERE F_int = :1", small)
 	var (
 		smallO             int
-		bigintO            string
+		bigintO            big.Int
 		notintO            float64
 		bigrealF, bigrealO big.Rat
 		bigrealS           string
@@ -75,7 +77,7 @@ func insert(t *testing.T, conn *sql.Tx,
 		dateO              time.Time
 	)
 	if err := row.Scan(&smallO, &bigintO, &notintO, &bigrealS, &textO, &dateO); err != nil {
-		t.Errorf("error scanning row: %v", err)
+		t.Errorf("error scanning row[%d]: %v", small, errgo.Details(err))
 		return false
 	}
 	t.Logf("row: small=%d big=%d notint=%f bigreal=%f text=%q date=%s",
@@ -84,7 +86,7 @@ func insert(t *testing.T, conn *sql.Tx,
 	if smallO != small {
 		t.Errorf("small mismatch: got %d, awaited %d.", smallO, small)
 	}
-	if bigintO != bigint {
+	if bigintO.String() != bigint {
 		t.Errorf("bigint mismatch: got %d, awaited %d.", bigintO, bigint)
 	}
 	if notintO != notint {

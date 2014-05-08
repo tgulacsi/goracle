@@ -1211,8 +1211,9 @@ func (v *Variable) getSingleValueInto(dest *interface{}, arrayPos uint) error {
 	err := v.typ.getValueInto(dest, v, arrayPos)
 	if err != nil {
 		log.Printf("%s.getSingleValueInto dest=%T(%+v) err=%s", v.typ, *dest, *dest, errgo.Details(err))
+		return errgo.Notef(err, "dest=%T(%#v)", *dest, *dest)
 	}
-	return errgo.Notef(err, "dest=%#v(%T)", *dest, *dest)
+	return nil
 }
 
 // getArrayValue returns the value of the variable as an array.

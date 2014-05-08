@@ -281,13 +281,13 @@ func numberVarGetValue(v *Variable, pos uint) (interface{}, error) {
 		return v.dataInts[pos], nil
 	}
 
+	var floatVal float64
 	num := (*C.OCINumber)(v.getHandle(pos))
 	if v.typ != NumberAsStringVarType {
 		if v.typ == BooleanVarType {
 			intVal, err := numAsInt(v, num)
 			return intVal > 0, errgo.Notef(err, "want boolean")
 		}
-		floatVal := float64(0)
 		err := v.environment.CheckStatus(
 			C.OCINumberToReal(v.environment.errorHandle,
 				num,
@@ -305,7 +305,7 @@ func numberVarGetValue(v *Variable, pos uint) (interface{}, error) {
 	}
 
 	buf := make([]byte, 64)
-	var size C.ub4
+	size := C.ub4(len(buf))
 	if err := v.environment.CheckStatus(
 		C.OCINumberToText(v.environment.errorHandle,
 			num,
@@ -314,7 +314,8 @@ func numberVarGetValue(v *Variable, pos uint) (interface{}, error) {
 			&size, (*C.oratext)(&buf[0])),
 		"NumberToText",
 	); err != nil {
-		log.Printf("format=%q len=%d num=%p (%d) size=%p buf=%p",
+		log.Printf("floatVal=%f format=%q len=%d num=%p (%d) size=%p buf=%p",
+			floatVal,
 			v.environment.numberToStringFormatBuffer,
 			len(v.environment.numberToStringFormatBuffer),
 			num, *((*byte)(unsafe.Pointer(num))),

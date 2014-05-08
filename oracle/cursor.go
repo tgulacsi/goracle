@@ -32,7 +32,6 @@ import (
 	"hash/fnv"
 	"log"
 
-	"github.com/juju/errgo/errors"
 	// "reflect"
 	"io"
 	"sort"
@@ -76,11 +75,11 @@ type Cursor struct {
 var DefaultArraySize uint = 50
 var (
 	//CursorIsClosed prints cursor is closed
-	CursorIsClosed = errors.New("cursor is closed")
+	CursorIsClosed = errgo.New("cursor is closed")
 	//QueriesNotSupported prints queries not supported
-	QueriesNotSupported = errors.New("queries not supported: results undefined")
+	QueriesNotSupported = errgo.New("queries not supported: results undefined")
 	//ListIsEmpty prints list is empty
-	ListIsEmpty = errors.New("list is empty")
+	ListIsEmpty = errgo.New("list is empty")
 )
 
 //statement // statementTag // rowFactory // inputTypeHandler // outputTypeHandler
@@ -173,7 +172,7 @@ func (cur *Cursor) String() string {
 func (cur *Cursor) getBindNames() (names []string, err error) {
 	// ensure that a statement has already been prepared
 	if cur.statement == nil {
-		err = errors.New("statement must be prepared first!")
+		err = errgo.New("statement must be prepared first!")
 		return
 	}
 
@@ -1615,7 +1614,7 @@ func (cur *Cursor) verifyFetch() error {
 	}
 
 	if cur.statementType != C.OCI_STMT_SELECT {
-		return errors.New("not a query")
+		return errgo.New("not a query")
 	}
 
 	return nil
@@ -1624,7 +1623,7 @@ func (cur *Cursor) verifyFetch() error {
 // Performs the actual fetch from Oracle.
 func (cur *Cursor) internalFetch(numRows uint) error {
 	if cur.fetchVariables == nil {
-		return errors.New("query not executed")
+		return errgo.New("query not executed")
 	}
 	debug("fetchVars=%v", cur.fetchVariables)
 	var err error
@@ -1771,7 +1770,7 @@ func (cur *Cursor) FetchAll() ([][]interface{}, error) {
 // fetchRaw performs a raw fetch on the cursor; return the actual number of rows fetched.
 func (cur *Cursor) fetchRaw(numRows uint) (int, error) {
 	if numRows > cur.fetchArraySize {
-		return -1, errors.New("rows to fetch exceeds array size")
+		return -1, errgo.New("rows to fetch exceeds array size")
 	}
 
 	// do not attempt to perform fetch if no more rows to fetch

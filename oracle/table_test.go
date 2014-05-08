@@ -42,7 +42,7 @@ func TestTable(t *testing.T) {
 	}
 	defer cur.Execute("DROP TABLE tst_goracle", nil, nil)
 
-	insert(t, cur, 1234567890, "1234567890123456", 123.456,
+	insert(t, cur, 1, "1234567890123456", 123.456,
 		"123456789.123456789", "int64", time.Now())
 
 	insert(t, cur, 2, "22345678901234567890", 223.456,
@@ -63,7 +63,7 @@ func insert(t *testing.T, cur *Cursor,
 		return false
 	}
 	if err := cur.Execute("SELECT * FROM tst_goracle WHERE F_int = :1", []interface{}{small}, nil); err != nil {
-		t.Errorf("error selecting tst_goracle: %s", errgo.Details(err))
+		t.Errorf("error with SELECT * FROM tst_goracle WHERE F_int = %d: %s", small, errgo.Details(err))
 		return false
 	}
 	row, err := cur.FetchOne()
