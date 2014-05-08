@@ -114,7 +114,7 @@ func (cur *Cursor) freeHandle() error {
 			cur.environment.errorHandle, (*C.OraText)(&cur.statementTag[0]),
 			C.ub4(len(cur.statementTag)), C.OCI_DEFAULT),
 			"statement release"); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	} else {
 		if CTrace {
@@ -123,7 +123,7 @@ func (cur *Cursor) freeHandle() error {
 		if err := cur.environment.CheckStatus(
 			C.OCIHandleFree(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT),
 			"freeCursor"); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	}
 	cur.handle = nil
@@ -259,7 +259,7 @@ func (cur *Cursor) performDefine() error {
 			unsafe.Pointer(&numParams), &x,
 			C.OCI_ATTR_PARAM_COUNT, cur.environment.errorHandle),
 		"PerformDefine"); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// debug("performDefine param count = %d", numParams)
 			err)
@@ -312,7 +312,7 @@ func (cur *Cursor) setRowCount() error {
 				C.OCI_HTYPE_STMT, unsafe.Pointer(&rowCount), &x,
 				C.OCI_ATTR_ROW_COUNT, cur.environment.errorHandle),
 			"SetRowCount"); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 		cur.rowCount = int(rowCount)
 	} else {
@@ -387,9 +387,9 @@ func (cur *Cursor) internalExecute(numIters uint) error {
 			mode),
 		"internalExecute"); err != nil {
 		cur.setErrorOffset(err)
-		return err
+		return errgo.Mask(err)
 	}
-	return cur.setRowCount()
+	return errgo.Mask(cur.setRowCount())
 }
 
 // getStatementType determines if the cursor is executing a select statement.
@@ -405,7 +405,7 @@ func (cur *Cursor) getStatementType() error {
 			unsafe.Pointer(&statementType), &vsize, C.OCI_ATTR_STMT_TYPE,
 			cur.environment.errorHandle),
 		"getStatementType"); err != nil {
-		return errors.Mask(err)
+		return errgo.Mask(err)
 	}
 	cur.statementType = int(statementType)
 	if CTrace {
@@ -423,15 +423,15 @@ func (cur *Cursor) getStatementType() error {
 func (cur *Cursor) fixupBoundCursor() error {
 	if cur.handle != nil && cur.statementType < 0 {
 		if err := cur.getStatementType(); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 		if cur.statementType == C.OCI_STMT_SELECT {
 			if err := cur.performDefine(); err != nil {
-				return errors.Mask(err)
+				return errgo.Mask(err)
 			}
 		}
 		if err := cur.setRowCount(); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	}
 	return nil
@@ -456,6 +456,7 @@ func (cur *Cursor) itemDescriptionHelper(pos uint, param *C.OCIParam) (desc Vari
 	}
 	// acquire usable type of intem
 	if varType, err = cur.environment.varTypeByOracleDescriptor(param); err != nil {
+		err = errgo.Mask(err)
 		return
 	}
 	logg("varType=%s", varType)
@@ -464,6 +465,7 @@ func (cur *Cursor) itemDescriptionHelper(pos uint, param *C.OCIParam) (desc Vari
 	if _, err = cur.environment.AttrGet(unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 		C.OCI_ATTR_DATA_SIZE, unsafe.Pointer(&internalSize),
 		"itemDescription: internal size"); err != nil {
+		err = errgo.Mask(err)
 		return
 	}
 	logg("internalSize=%d", internalSize)
@@ -472,6 +474,7 @@ func (cur *Cursor) itemDescriptionHelper(pos uint, param *C.OCIParam) (desc Vari
 	if _, err = cur.environment.AttrGet(unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 		C.OCI_ATTR_CHAR_SIZE, unsafe.Pointer(&charSize),
 		"itemDescription(): character size"); err != nil {
+		err = errgo.Mask(err)
 		return
 	}
 	logg("charSize=%d", charSize)
@@ -481,6 +484,7 @@ func (cur *Cursor) itemDescriptionHelper(pos uint, param *C.OCIParam) (desc Vari
 	if name, err = cur.environment.AttrGetName(
 		unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 		C.OCI_ATTR_NAME, "itemDescription(): name"); err != nil {
+		err = errgo.Mask(err)
 		return
 	}
 	logg("name=%s", name)
@@ -490,12 +494,14 @@ func (cur *Cursor) itemDescriptionHelper(pos uint, param *C.OCIParam) (desc Vari
 		if _, err = cur.environment.AttrGet(unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 			C.OCI_ATTR_SCALE, unsafe.Pointer(&scale),
 			"itemDescription(): scale"); err != nil {
+			err = errgo.Mask(err)
 			return
 		}
 		logg("scale=%d", scale)
 		if _, err = cur.environment.AttrGet(unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 			C.OCI_ATTR_PRECISION, unsafe.Pointer(&precision),
 			"itemDescription(): precision"); err != nil {
+			err = errgo.Mask(err)
 			return
 		}
 		logg("precision=%d", precision)
@@ -505,6 +511,7 @@ func (cur *Cursor) itemDescriptionHelper(pos uint, param *C.OCIParam) (desc Vari
 	if _, err = cur.environment.AttrGet(unsafe.Pointer(param), C.OCI_HTYPE_DESCRIBE,
 		C.OCI_ATTR_IS_NULL, unsafe.Pointer(&nullOk),
 		"itemDescription(): nullable"); err != nil {
+		err = errgo.Mask(err)
 		return
 	}
 	logg("nullOk=%d", nullOk)
@@ -778,7 +785,7 @@ func (cur *Cursor) setBindVariablesByPos(parameters []interface{}, // parameters
 			origVar = cur.bindVarsArr[i]
 		}
 		if newVar, err = cur.setBindVariableHelper(numElements, arrayPos, deferTypeAssignment, v, origVar); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 		if newVar != nil {
 			if i < len(cur.bindVarsArr) {
@@ -824,7 +831,7 @@ func (cur *Cursor) setBindVariablesByName(parameters map[string]interface{}, // 
 		origVar = cur.bindVarsMap[k]
 		if newVar, err = cur.setBindVariableHelper(numElements, arrayPos, deferTypeAssignment,
 			v, origVar); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 		if newVar != nil {
 			cur.bindVarsMap[k] = newVar
@@ -857,7 +864,7 @@ func (cur *Cursor) performBind() (err error) {
 	if cur.bindVarsMap != nil {
 		for k, v := range cur.bindVarsMap {
 			if err = v.Bind(cur, k, 1); err != nil {
-				return errors.Mask(err)
+				return errgo.Mask(err)
 			}
 		}
 		/*
@@ -876,7 +883,7 @@ func (cur *Cursor) performBind() (err error) {
 	} else if cur.bindVarsArr != nil {
 		for i, v := range cur.bindVarsArr {
 			if err = v.Bind(cur, "", uint(i+1)); err != nil {
-				return errors.Mask(err)
+				return errgo.Mask(err)
 			}
 		}
 	}
@@ -896,7 +903,7 @@ func (cur *Cursor) createRow() ([]interface{}, error) {
 	// acquire the value for each item
 	for pos, v := range cur.fetchVariables {
 		if row[pos], err = v.GetValue(uint(cur.rowNum)); err != nil {
-			return nil, errors.Mask(err)
+			return nil, errgo.Mask(err)
 		}
 	}
 
@@ -940,7 +947,7 @@ func (cur *Cursor) fetchInto(row ...interface{}) error {
 		}
 		v = cur.fetchVariables[pos]
 		if err = v.GetValueInto(x, uint(cur.rowNum)); err != nil {
-			return errors.Mask(
+			return errgo.Mask(
 
 				// row[pos] = *x
 				err)
@@ -996,7 +1003,7 @@ func (cur *Cursor) internalPrepare(statement string, statementTag string) error 
 	}
 	// release existing statement, if necessary
 	if err := cur.freeHandle(); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// prepare statement
 			err)
@@ -1029,7 +1036,7 @@ func (cur *Cursor) internalPrepare(statement string, statementTag string) error 
 	} else {
 		if cur.handle == nil {
 			if err := cur.allocateHandle(); err != nil {
-				return errors.Mask(err)
+				return errgo.Mask(err)
 			}
 		}
 		debug(`%p.Prepare for "%s"`, cur)
@@ -1070,7 +1077,7 @@ func (cur *Cursor) internalPrepare(statement string, statementTag string) error 
 
 	// determine if statement is a query
 	if err := cur.getStatementType(); err != nil {
-		return errors.Mask(err)
+		return errgo.Mask(err)
 	}
 
 	return nil
@@ -1093,7 +1100,7 @@ func (cur *Cursor) Parse(statement string) error {
 
 	// prepare the statement
 	if err := cur.internalPrepare(statement, ""); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// parse the statement
 			err)
@@ -1118,7 +1125,7 @@ func (cur *Cursor) Parse(statement string) error {
 			mode),
 		"parse"); err != nil {
 		// Py_END_ALLOW_THREADS
-		return errors.Mask(err)
+		return errgo.Mask(err)
 	}
 
 	return nil
@@ -1133,7 +1140,7 @@ func (cur *Cursor) Prepare(statement, statementTag string) error {
 
 	// prepare the statement
 	if err := cur.internalPrepare(statement, statementTag); err != nil {
-		return errors.Mask(err)
+		return errgo.Mask(err)
 	}
 	return nil
 }
@@ -1268,7 +1275,7 @@ func (cur *Cursor) call( // cursor to call procedure/function
 	_, err := cur.callCalculateSize(name, returnValue, listOfArguments,
 		keywordArguments)
 	if err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// determine the statement to execute and the argument to pass
 			err)
@@ -1294,14 +1301,14 @@ func (cur *Cursor) CallFunc(
 	// create the return variable
 	variable, err := returnType.NewVariable(cur, 0, 0)
 	if err != nil {
-		return nil, errors.Mask(
+		return nil, errgo.Mask(
 
 			// call the function
 			err)
 	}
 
 	if err = cur.call(variable, name, parameters, keywordParameters); err != nil {
-		return nil, errors.Mask(
+		return nil, errgo.Mask(
 
 			// determine the results
 			err)
@@ -1386,7 +1393,7 @@ func (cur *Cursor) Execute(statement string,
 	var err error
 	// prepare the statement, if applicable
 	if err = cur.internalPrepare(statement, ""); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// debug("internalPrepare done, performing binds")
 			// perform binds
@@ -1395,15 +1402,15 @@ func (cur *Cursor) Execute(statement string,
 
 	if listArgs != nil && len(listArgs) > 0 {
 		if err = cur.setBindVariablesByPos(listArgs, 1, 0, false); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	} else if keywordArgs != nil && len(keywordArgs) > 0 {
 		if err = cur.setBindVariablesByName(keywordArgs, 1, 0, false); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	}
 	if err = cur.performBind(); err != nil {
-		return errors.Mask(err)
+		return errgo.Mask(err)
 	}
 	debug("bind done, executing statement listArgs=%v", listArgs)
 
@@ -1414,6 +1421,7 @@ func (cur *Cursor) Execute(statement string,
 		numIters = 0
 	}
 	if err = cur.internalExecute(numIters); err != nil {
+		err = errgo.Mask(err)
 		if oraErr, ok := errgo.Cause(err).(*Error); ok && oraErr.Code == 1008 { // ORA-1008: not all variables bound
 			inStmt := CountStatementVars(statement)
 			unnecessary := make([]string, 0, len(listArgs)+len(keywordArgs))
@@ -1455,14 +1463,14 @@ func (cur *Cursor) Execute(statement string,
 				fmt.Sprintf("\nqry=%q\narr=%s, map=%s", statement, cur.bindVarsArr, cur.bindVarsMap))
 			//err = oraErr
 		}
-		return err
+		return err // already masked
 	}
 	// debug("executed, calling performDefine")
 
 	// perform defines, if necessary
 	if isQuery && cur.fetchVariables == nil {
 		if err = cur.performDefine(); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	}
 
@@ -1471,7 +1479,7 @@ func (cur *Cursor) Execute(statement string,
 	cur.outputSizeColumn = -1
 
 	if !isQuery {
-		return cur.getPtrValues()
+		return errgo.Mask(cur.getPtrValues())
 	}
 
 	return nil
@@ -1526,7 +1534,7 @@ func (cur *Cursor) ExecuteMany(statement string, params []map[string]interface{}
 	var err error
 	// prepare the statement
 	if err = cur.internalPrepare(statement, ""); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// queries are not supported as the result is undefined
 			err)
@@ -1541,11 +1549,11 @@ func (cur *Cursor) ExecuteMany(statement string, params []map[string]interface{}
 	for i, arguments := range params {
 		if err = cur.setBindVariablesByName(arguments, uint(numRows), uint(i),
 			(i < numRows-1)); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	}
 	if err = cur.performBind(); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// execute the statement, but only if the number of rows is greater than
 			// zero since Oracle raises an error otherwise
@@ -1554,7 +1562,7 @@ func (cur *Cursor) ExecuteMany(statement string, params []map[string]interface{}
 
 	if numRows > 0 {
 		if err = cur.internalExecute(uint(numRows)); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	}
 
@@ -1582,13 +1590,13 @@ func (cur *Cursor) ExecuteManyPrepared(numIters uint) error {
 	var err error
 	// perform binds
 	if err = cur.performBind(); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// execute the statement
 			err)
 	}
 
-	return cur.internalExecute(numIters)
+	return errgo.Mask(cur.internalExecute(numIters))
 }
 
 // Verify that fetching may happen from this cursor.
@@ -1600,7 +1608,7 @@ func (cur *Cursor) verifyFetch() error {
 
 	// fixup bound cursor, if necessary
 	if err := cur.fixupBoundCursor(); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// make sure the cursor is for a query
 			err)
@@ -1630,7 +1638,7 @@ func (cur *Cursor) internalFetch(numRows uint) error {
 		// debug("preFetch=%s", v.typ.preFetch)
 		if v.typ.preFetch != nil {
 			if err = v.typ.preFetch(v); err != nil {
-				return errors.Mask(err)
+				return errgo.Mask(err)
 			}
 		}
 	}
@@ -1651,7 +1659,7 @@ func (cur *Cursor) internalFetch(numRows uint) error {
 	if _, err = cur.environment.AttrGet(unsafe.Pointer(cur.handle), C.OCI_HTYPE_STMT,
 		C.OCI_ATTR_ROW_COUNT, unsafe.Pointer(&rowCount),
 		"internalFetch(): row count"); err != nil {
-		return errors.Mask(
+		return errgo.Mask(
 
 			// debug("row count = %d", rowCount)
 			err)
@@ -1669,7 +1677,7 @@ func (cur *Cursor) moreRows() (bool, error) {
 	if cur.rowNum >= cur.actualRows {
 		if cur.actualRows < 0 || uint(cur.actualRows) == cur.fetchArraySize {
 			if err := cur.internalFetch(cur.fetchArraySize); err != nil {
-				return false, errors.Mask(err)
+				return false, errgo.Mask(err)
 			}
 		}
 		if cur.rowNum >= cur.actualRows {
@@ -1746,7 +1754,7 @@ func (cur *Cursor) FetchMany(rowLimit int) ([][]interface{}, error) {
 
 	// verify fetch can be performed
 	if err := cur.verifyFetch(); err != nil {
-		return nil, errors.Mask(err)
+		return nil, errgo.Mask(err)
 	}
 
 	return cur.multiFetch(rowLimit)
@@ -1755,7 +1763,7 @@ func (cur *Cursor) FetchMany(rowLimit int) ([][]interface{}, error) {
 // FetchAll fetches all remaining rows from the cursor.
 func (cur *Cursor) FetchAll() ([][]interface{}, error) {
 	if err := cur.verifyFetch(); err != nil {
-		return nil, errors.Mask(err)
+		return nil, errgo.Mask(err)
 	}
 	return cur.multiFetch(0)
 }
@@ -1773,7 +1781,7 @@ func (cur *Cursor) fetchRaw(numRows uint) (int, error) {
 
 	// perform internal fetch
 	if err := cur.internalFetch(numRows); err != nil {
-		return -1, errors.Mask(err)
+		return -1, errgo.Mask(err)
 	}
 
 	cur.rowCount += cur.actualRows
@@ -1804,7 +1812,7 @@ func (cur *Cursor) SetInputSizesByPos(types []VariableType) error {
 	var err error
 	for _, t := range types {
 		if nv, err = t.NewVariable(cur, 0, 0); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 		cur.bindVarsArr = append(cur.bindVarsArr, nv)
 	}
@@ -1828,7 +1836,7 @@ func (cur *Cursor) SetInputSizesByName(types map[string]VariableType) error {
 	// process each input
 	for k, t := range types {
 		if cur.bindVarsMap[k], err = t.NewVariable(cur, 0, 0); err != nil {
-			return errors.Mask(err)
+			return errgo.Mask(err)
 		}
 	}
 	return nil
@@ -1870,10 +1878,10 @@ static PyObject *Cursor_GetIter(
 // getNext returns a reference to the cursor which supports the iterator protocol.
 func (cur *Cursor) getNext() error {
 	if err := cur.verifyFetch(); err != nil {
-		return errors.Mask(err)
+		return errgo.Mask(err)
 	}
 	if more, err := cur.moreRows(); err != nil {
-		return errors.Mask(err)
+		return errgo.Mask(err)
 	} else if more {
 		_, err = cur.createRow()
 		return err

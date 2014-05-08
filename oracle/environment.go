@@ -44,9 +44,10 @@ import "C"
 import (
 	"bytes"
 	"fmt"
-	"github.com/juju/errgo/errors"
 	"log"
 	"unsafe"
+
+	"github.com/juju/errgo/errors"
 )
 
 // Environment holds handles for the database environment
@@ -320,10 +321,8 @@ func (env *Environment) CheckStatus(status C.sword, at string) error {
 			break
 		}
 	}
-	err := &Error{Code: errorcode,
-		Message: fmt.Sprintf("[%d] %s", status, message),
-		At:      at}
-	log.Printf("CheckStatus(%d) ERR=%v", status, err)
+	err := NewErrorAt(errorcode, fmt.Sprintf("[%d] %s", status, message), at)
+	log.Printf("CheckStatus(%d) ERR=%#v", status, err)
 	return err
 }
 

@@ -33,7 +33,12 @@ type Error struct {
 
 // NewError creates a new error, pointing to the code with the given message
 func NewError(code int, message string) *Error {
-	return &Error{Code: code, Message: message}
+	return NewErrorAt(code, message, "")
+}
+
+// NewErrorAt creates a new error, pointing to the code with the given message
+func NewErrorAt(code int, message, at string) *Error {
+	return &Error{Code: code, Message: message, At: at}
 }
 
 // Error returns a string representation of the error (implenets error)
