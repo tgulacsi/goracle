@@ -210,7 +210,7 @@ func (r rowsRes) Next(dest []driver.Value) error {
 	// log.Printf("FetcOneInto(%p %+v len=%d) %T", row, *row, len(*row), *row)
 	err := r.cu.FetchOneInto(*row...)
 	debug("fetched row=%p %#v (len=%d) err=%v", row, *row, len(*row), err)
-	return err
+	return errgo.Mask(err)
 }
 
 // Driver implements a Driver

@@ -70,22 +70,24 @@ func insert(t *testing.T, conn *sql.Tx,
 	var (
 		smallO             int
 		bigintO            big.Int
+		bigintI, bigrealI  interface{}
 		notintO            float64
 		bigrealF, bigrealO big.Rat
-		bigrealS           string
-		textO              string
-		dateO              time.Time
+		//bigrealS           string
+		textO string
+		dateO time.Time
 	)
-	if err := row.Scan(&smallO, &bigintO, &notintO, &bigrealS, &textO, &dateO); err != nil {
+	if err := row.Scan(&smallO, &bigintI, &notintO, &bigrealI, &textO, &dateO); err != nil {
 		t.Errorf("error scanning row[%d]: %v", small, errgo.Details(err))
 		return false
 	}
-	t.Logf("row: small=%d big=%d notint=%f bigreal=%f text=%q date=%s",
-		smallO, bigintO, notintO, bigrealO, textO, dateO)
+	t.Logf("row: small=%d big=%s notint=%f bigreal=%s text=%q date=%s",
+		smallO, bigintI, notintO, bigrealI, textO, dateO)
 
 	if smallO != small {
 		t.Errorf("small mismatch: got %d, awaited %d.", smallO, small)
 	}
+	(&bigintO).Set(bigintI.(*big.Int))
 	if bigintO.String() != bigint {
 		t.Errorf("bigint mismatch: got %d, awaited %d.", bigintO, bigint)
 	}
@@ -93,7 +95,16 @@ func insert(t *testing.T, conn *sql.Tx,
 		t.Errorf("noting mismatch: got %d, awaited %d.", notintO, notint)
 	}
 	(&bigrealF).SetString(bigreal)
-	(&bigrealO).SetString(bigrealS)
+	switch x := bigrealI.(type) {
+	case float64:
+		(&bigrealO).SetFloat64(x)
+	case string:
+		(&bigrealO).SetString(x)
+	case *big.Rat:
+		(&bigrealO).Set(x)
+	default:
+		(&bigrealO).SetString(fmt.Sprintf("%s", bigrealI))
+	}
 	if (&bigrealO).Cmp(&bigrealF) != 0 {
 		t.Errorf("bigreal mismatch: got %s, awaited %s.", (&bigrealO), (&bigrealF))
 	}
@@ -101,7 +112,7 @@ func insert(t *testing.T, conn *sql.Tx,
 		t.Errorf("text mismatch: got %q, awaited %q.", textO, text)
 	}
 	if !dateO.Equal(date.Round(time.Second)) {
-		t.Errorf("date mismatch: got %s, awaited %s.", dateO, date)
+		t.Errorf("date mismatch: got %s, awaited %s.", dateO, date.Round(time.Second))
 	}
 
 	return true
