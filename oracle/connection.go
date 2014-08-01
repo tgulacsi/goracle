@@ -1,5 +1,3 @@
-package oracle
-
 /*
 Copyright 2013 Tamás Gulácsi
 
@@ -15,6 +13,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
+package oracle
 
 /*
 #cgo LDFLAGS: -lclntsh
@@ -78,10 +78,11 @@ func ClientVersion() []int32 {
 // Connection stores the handles for a connection
 type Connection struct {
 	// not exported fields
-	handle        *C.OCISvcCtx  //connection
-	serverHandle  *C.OCIServer  //server's handle
-	sessionHandle *C.OCISession //session's handle
-	environment   *Environment  //environment
+	handle         *C.OCISvcCtx  //connection
+	serverHandle   *C.OCIServer  //server's handle
+	sessionHandle  *C.OCISession //session's handle
+	environment    *Environment  //environment
+	connectionPool *ConnectionPool
 	// sessionPool *SessionPool //sessionpool
 	username, password, dsn, version string
 	commitMode                       int64
@@ -139,6 +140,10 @@ func NewConnection(username, password, dsn string, autocommit bool /*commitMode 
 // Connect to the database.
 // good minimal example: http://www.adp-gmbh.ch/ora/misc/oci/index.html
 func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string*/) error {
+	if conn.connectionPool != nil {
+		return nil
+	}
+
 	credentialType := C.OCI_CRED_EXT
 	var (
 		status C.sword
@@ -493,6 +498,13 @@ func (conn *Connection) Close() (err error) {
 	}
 
 	conn.srvMtx.Lock()
+	// if pooled, return to the pool
+	if conn.connectionPool != nil {
+		err = conn.connectionPool.Release(conn)
+		conn.srvMtx.Unlock()
+		return err
+	}
+
 	// perform a rollback
 	conn.rollback()
 
