@@ -18,7 +18,12 @@ limitations under the License.
 package rdbdrv
 
 import (
+	"bytes"
+	"compress/zlib"
 	"errors"
+	"io"
+	"strconv"
+	"strings"
 
 	"bitbucket.org/kardianos/rdb"
 	"github.com/tgulacsi/goracle/oracle"
@@ -26,7 +31,7 @@ import (
 
 // Interface implementation checks.
 var (
-	_ rdb.Driver = &driver{}
+	_ rdb.Driver     = &driver{}
 	_ rdb.DriverConn = &conn{}
 )
 
@@ -40,7 +45,9 @@ var (
 		},
 	}
 
-	pingCommand = &rdb.Command{Sql: "SELECT 1 FROM DUAL", Arity: rdb.One, Prepare: true, Name: "ping"}
+	pingCommand = &rdb.Command{
+		Sql: "SELECT 1 FROM DUAL", Arity: rdb.One,
+		Prepare: true, Name: "ping"}
 )
 
 type driver struct {
@@ -72,7 +79,8 @@ func (d driver) PingCommand() *rdb.Command {
 }
 
 type conn struct {
-	cx *oracle.Connection
+	cx   *oracle.Connection
+	last *stmt
 }
 
 // Close the underlying connection to the database.
@@ -80,13 +88,202 @@ func (c *conn) Close() {
 	if c.cx == nil {
 		return
 	}
-		c.cx.Close()
-		c.cx = nil
-	}
+	c.cx.Close()
+	c.cx = nil
+}
 
 // Connectioninfo returns version information regarding the currently connected server.
-func (c conn) ConnectionInfo() *ConnectionInfo {
+func (c conn) ConnectionInfo() *rdb.ConnectionInfo {
+	// TODO(tgulacsi): proper versions
+	return &rdb.ConnectionInfo{Server: nil, Protocol: nil}
+}
+
+func (c conn) Status() rdb.DriverConnStatus {
+	if c.cx == nil || !c.cx.IsConnected() {
+		return rdb.StatusDisconnected
+	}
+	if c.last != nil && c.last.cu != nil {
+		return rdb.StatusQuery
+	}
+	return rdb.StatusReady
+}
+
+type stmt struct {
+	cu         *oracle.Cursor
+	query, tag string
+	cols       []oracle.VariableDescription
+}
+
+// Query executes the query defined in cmd.
+// Should return "PreparedTokenNotValid" if the preparedToken was not recognized.
+func (c *conn) Query(cmd *rdb.Command, params []rdb.Param, preparedToken interface{}, val rdb.DriverValuer) error {
+	st, ok := preparedToken.(stmt)
+	if !ok || st.cu == nil {
+		return rdb.PreparedTokenNotValid
+	}
+	var err error
+	if len(params) == 0 {
+		err = st.cu.Execute(st.query, nil, nil)
+	} else if params[0].Name == "" {
+		args := make([]interface{}, len(params))
+		for i, p := range params {
+			args[i] = p.Value
+		}
+		err = st.cu.Execute(st.query, args, nil)
+	} else {
+		args := make(map[string]interface{}, len(params))
+		for _, p := range params {
+			args[p.Name] = p.Value
+		}
+		err = st.cu.Execute(st.query, nil, args)
+	}
+	if err != nil {
+		return filterErr(err)
+	}
+
+	if !st.cu.IsDDL() {
+		st.cols, err = st.cu.GetDescription()
+		if err != nil {
+			return err
+		}
+		c.last = &st
+	}
+
+	return nil
+}
+
+// Prepare the query specified in cmd.
+func (c *conn) Prepare(cmd *rdb.Command) (preparedToken interface{}, err error) {
+	query := cmd.Sql
+	if strings.Index(query, ":1") < 0 && strings.Index(query, "?") >= 0 {
+		q := strings.Split(query, "?")
+		q2 := make([]string, 0, 2*len(q)-1)
+		for i := 0; i < len(q); i++ {
+			if i > 0 {
+				q2 = append(q2, ":"+strconv.Itoa(i))
+			}
+			q2 = append(q2, q[i])
+		}
+		query = strings.Join(q2, "")
+	}
+	cu := c.cx.NewCursor()
+	st := stmt{cu: cu, query: query, tag: genQueryTag(query)}
+	if err = cu.Prepare(st.query, st.tag); err != nil {
+		return nil, err
+	}
+	return interface{}(st), nil
+}
+
+// Unprepare clears the prepared token.
+func (c *conn) Unprepare(preparedToken interface{}) error {
+	st, ok := preparedToken.(stmt)
+	if !ok {
+		return nil
+	}
+	st.cu.Close()
+	st.cu = nil
+	return nil
 }
 
 // Scan reads the next row from the connection.
-func (c conn) 
+// For each field in the row call the Valuer.WriteField(...) method.
+// Propagate the reportRow field.
+//
+// Only the connection's LAST statement will be fetched with this!
+func (c *conn) Scan(reportRow bool) error {
+	if c.last == nil {
+		return errors.New("no statement has been executed")
+	}
+	if c.last.cu == nil {
+		return errors.New("cursor is nil")
+	}
+	st := c.last
+
+	row := make([]interface{}, len(st.cols))
+	err := st.cu.FetchOneInto(row...)
+	if err == io.EOF {
+		st.cu.Close()
+		st.cu = nil
+	}
+	return err
+}
+
+// Begin a new transaction.
+func (c *conn) Begin(iso rdb.IsolationLevel) error {
+	if c.cx.IsConnected() {
+		return nil
+	}
+	return filterErr(c.cx.Connect(0, false))
+}
+
+// Rollback to savepoint.
+func (c *conn) Rollback(savepoint string) error {
+	savepoint = filterName(savepoint)
+	if savepoint == "" {
+		return c.cx.Rollback()
+	}
+	return c.cx.NewCursor().Execute("ROLLBACK TO "+savepoint, nil, nil)
+}
+
+func (c *conn) Commit() error {
+	return c.cx.Commit()
+}
+
+// SavePoint creates a new savepoint.
+func (c *conn) SavePoint(savepoint string) error {
+	return c.cx.NewCursor().Execute("SAVEPOINT "+filterName(savepoint), nil, nil)
+}
+
+// filterName returns the name filtered to be able to used as a name in Oracle
+func filterName(name string) string {
+	if name == "" {
+		return ""
+	}
+	if i := strings.IndexByte(name, ' '); i >= 0 {
+		name = name[:i]
+	}
+	i := 0
+	name = strings.Map(func(r rune) rune {
+		i++
+		switch {
+		case r >= 'a' && r < 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return 'a' + (r - 'A')
+		case r >= '0' && r <= '9':
+			if i > 1 {
+				return r
+			}
+		}
+		return -1
+	}, name)
+	if len(name) > 30 {
+		return name[:30]
+	}
+	return name
+}
+
+// filterErr filters the error, returns driver.ErrBadConn if appropriate
+func filterErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if oraErr, ok := err.(*oracle.Error); ok {
+		switch oraErr.Code {
+		case 115, 451, 452, 609, 1090, 1092, 1073, 3113, 3114, 3135, 3136, 12153, 12161, 12170, 12224, 12230, 12233, 12510, 12511, 12514, 12518, 12526, 12527, 12528, 12539: //connection errors - try again!
+			return errors.New("bad connection")
+		}
+	}
+	return err
+}
+
+func genQueryTag(query string) string {
+	if query == "" {
+		return ""
+	}
+	var b bytes.Buffer
+	w := zlib.NewWriter(&b)
+	_, _ = w.Write([]byte(query))
+	_ = w.Close()
+	return b.String()
+}
