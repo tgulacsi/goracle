@@ -183,6 +183,10 @@ func TestSplitDSN(t *testing.T) {
 var conn *Connection
 
 func getConnection(t *testing.T) *Connection {
+	if true {
+		return getPooledConn(t)
+	}
+
 	if conn.IsConnected() {
 		return conn
 	}
