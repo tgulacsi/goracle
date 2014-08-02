@@ -24,6 +24,9 @@ import (
 func TestConnPool(t *testing.T) {
 	c1 := getPooledConn(t)
 	t.Logf("pooled conn 1: %#v", c1)
+	if err := c1.NewCursor().Execute("SELECT 1 FROM DUAL", nil, nil); err != nil {
+		t.Errorf("bad connection: %v", err)
+	}
 	c2 := getPooledConn(t)
 	t.Logf("pooled conn 2: %#v", c2)
 	if err := c1.Close(); err != nil {

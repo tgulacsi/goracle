@@ -113,7 +113,7 @@ func (cp *ConnectionPool) Close() error {
 // Acquire a new connection.
 // On Close of this returned connection, it will only released back to the pool.
 func (cp *ConnectionPool) Acquire() (*Connection, error) {
-	conn := &Connection{connectionPool: cp}
+	conn := &Connection{connectionPool: cp, environment: cp.environment}
 	if err := cp.environment.CheckStatus(
 		C.OCISessionGet(cp.environment.handle, cp.environment.errorHandle,
 			&conn.handle, cp.authHandle,
@@ -128,7 +128,15 @@ func (cp *ConnectionPool) Acquire() (*Connection, error) {
 
 // Release a connection back to the pool.
 func (cp *ConnectionPool) Release(conn *Connection) error {
-	return cp.environment.CheckStatus(
+	if conn == nil || conn.handle == nil || conn.connectionPool == nil || !conn.IsConnected() {
+		return nil
+	}
+	err := cp.environment.CheckStatus(
 		C.OCISessionRelease(conn.handle, cp.environment.errorHandle, nil, 0, C.OCI_DEFAULT),
 		"SessionRelease")
+	if err != nil {
+		conn.Close()
+		conn.handle = nil
+	}
+	return nil
 }
