@@ -184,7 +184,7 @@ var pool ConnectionPool
 var conn *Connection
 
 func getConnection(t *testing.T) *Connection {
-	if conn.IsConnected() {
+	if pool == nil && conn.IsConnected() {
 		return conn
 	}
 	var err error

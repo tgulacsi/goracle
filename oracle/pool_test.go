@@ -53,9 +53,14 @@ func TestConnPool(t *testing.T) {
 		if err := c2.Close(); err != nil {
 			t.Errorf("close c2: %v", err)
 		}
+
 		if err := c3.Close(); err != nil {
 			t.Errorf("close c3: %v", err)
 		}
+
+		TestSimpleBinds(t)
+		go TestSimpleTypes(t)
+
 		pool.Close()
 	}
 }

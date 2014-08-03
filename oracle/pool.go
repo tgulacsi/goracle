@@ -44,6 +44,9 @@ type goConnectionPool struct {
 
 // NewGoConnectionPool returns a simple sync.Pool-backed ConnectionPool.
 func NewGoConnectionPool(username, password, sid string, connMax int) (ConnectionPool, error) {
+	if connMax <= 0 {
+		connMax = 999
+	}
 	return &goConnectionPool{
 		pool:     make(chan *Connection, connMax),
 		username: username, password: password, sid: sid,
@@ -62,7 +65,9 @@ func (cp *goConnectionPool) Get() (*Connection, error) {
 func (cp *goConnectionPool) Put(conn *Connection) {
 	select {
 	case cp.pool <- conn:
+		// in chan
 	default:
+		conn.Close()
 	}
 }
 
@@ -71,6 +76,9 @@ func (cp *goConnectionPool) Close() error {
 		return nil
 	}
 	close(cp.pool)
+	for c := range cp.pool {
+		c.Close()
+	}
 	cp.pool = nil
 	return nil
 }
