@@ -27,21 +27,69 @@ import (
 	"unsafe"
 )
 
+// ConnectionPool is a connection pool interface
+type ConnectionPool interface {
+	// Get returns a new connection
+	Get() (*Connection, error)
+	// Put puts the connection back to the pool
+	Put(*Connection)
+	// Close closes the pool
+	Close() error
+}
+
+type goConnectionPool struct {
+	pool                    chan *Connection
+	username, password, sid string
+}
+
+// NewGoConnectionPool returns a simple sync.Pool-backed ConnectionPool.
+func NewGoConnectionPool(username, password, sid string, connMax int) (ConnectionPool, error) {
+	return &goConnectionPool{
+		pool:     make(chan *Connection, connMax),
+		username: username, password: password, sid: sid,
+	}, nil
+}
+
+func (cp *goConnectionPool) Get() (*Connection, error) {
+	select {
+	case c := <-cp.pool:
+		return c, nil
+	default:
+		return NewConnection(cp.username, cp.password, cp.sid, false)
+	}
+}
+
+func (cp *goConnectionPool) Put(conn *Connection) {
+	select {
+	case cp.pool <- conn:
+	default:
+	}
+}
+
+func (cp *goConnectionPool) Close() error {
+	if cp == nil || cp.pool == nil {
+		return nil
+	}
+	close(cp.pool)
+	cp.pool = nil
+	return nil
+}
+
 // ConnectionPool holds C.OCICPool for connection pooling
-type ConnectionPool struct {
+type oraConnectionPool struct {
 	handle      *C.OCICPool
 	authHandle  *C.OCIAuthInfo
 	environment *Environment
 	name        string
 }
 
-// NewConnectionPool returns a new connection pool.
-func NewConnectionPool(username, password, dblink string, connMin, connMax, connIncr int) (*ConnectionPool, error) {
+// NewORAConnectionPool returns a new connection pool wrapping an OCI Connection Pool.
+func NewORAConnectionPool(username, password, dblink string, connMin, connMax, connIncr int) (ConnectionPool, error) {
 	env, err := NewEnvironment()
 	if err != nil {
 		return nil, err
 	}
-	var pool ConnectionPool
+	var pool oraConnectionPool
 	if err = ociHandleAlloc(unsafe.Pointer(env.handle),
 		C.OCI_HTYPE_CPOOL, (*unsafe.Pointer)(unsafe.Pointer(&pool.handle)),
 		"pool.handle"); err != nil || pool.handle == nil {
@@ -97,7 +145,7 @@ func NewConnectionPool(username, password, dblink string, connMin, connMax, conn
 }
 
 // Close the connection pool.
-func (cp *ConnectionPool) Close() error {
+func (cp *oraConnectionPool) Close() error {
 	cp.authHandle = nil
 	if cp.handle == nil {
 		return nil
@@ -112,7 +160,7 @@ func (cp *ConnectionPool) Close() error {
 
 // Acquire a new connection.
 // On Close of this returned connection, it will only released back to the pool.
-func (cp *ConnectionPool) Acquire() (*Connection, error) {
+func (cp *oraConnectionPool) Get() (*Connection, error) {
 	conn := &Connection{connectionPool: cp, environment: cp.environment}
 	if err := cp.environment.CheckStatus(
 		C.OCISessionGet(cp.environment.handle, cp.environment.errorHandle,
@@ -127,16 +175,19 @@ func (cp *ConnectionPool) Acquire() (*Connection, error) {
 }
 
 // Release a connection back to the pool.
-func (cp *ConnectionPool) Release(conn *Connection) error {
+func (cp *oraConnectionPool) Put(conn *Connection) {
 	if conn == nil || conn.handle == nil || conn.connectionPool == nil || !conn.IsConnected() {
-		return nil
+		return
 	}
+	conn.srvMtx.Lock()
+	defer conn.srvMtx.Unlock()
 	err := cp.environment.CheckStatus(
 		C.OCISessionRelease(conn.handle, cp.environment.errorHandle, nil, 0, C.OCI_DEFAULT),
 		"SessionRelease")
 	if err != nil {
-		conn.Close()
+		conn.connectionPool = nil
+		conn.close()
 		conn.handle = nil
 	}
-	return nil
+	return
 }

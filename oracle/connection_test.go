@@ -180,23 +180,27 @@ func TestSplitDSN(t *testing.T) {
 	}
 }
 
+var pool ConnectionPool
 var conn *Connection
 
 func getConnection(t *testing.T) *Connection {
-	if true {
-		return getPooledConn(t)
-	}
-
 	if conn.IsConnected() {
 		return conn
 	}
-
+	var err error
+	if pool != nil {
+		conn, err = pool.Get()
+		if err != nil {
+			log.Panicf("error getting connection from pool: %v", err)
+		}
+		return conn
+	}
 	if !(dsn != nil && *dsn != "") {
 		t.Logf("cannot test connection without dsn!")
 		return conn
 	}
+
 	user, passw, sid := SplitDSN(*dsn)
-	var err error
 	conn, err = NewConnection(user, passw, sid, false)
 	if err != nil {
 		log.Panicf("error creating connection to %s: %s", *dsn, err)

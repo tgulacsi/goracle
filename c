@@ -52,8 +52,8 @@ fi
 
 dsn=${DSN:-$(cat $(dirname $0)/.dsn)}
 
-go test -i ./godrv/
-go test ./godrv/ -dsn="${dsn}" "$@"
+go test -i -race ./godrv/
+go test -race ./godrv/ -dsn="${dsn}" "$@"
 echo -----------------------------------------------------------------------
 echo "./oracle.test -dsn=\$\(cat $(dirname $0)/.dsn\) ""$@"
 RECONNECTS=${RECONNECTS:-3} ./oracle.test -dsn="$dsn" "$@"

@@ -82,7 +82,7 @@ type Connection struct {
 	serverHandle   *C.OCIServer  //server's handle
 	sessionHandle  *C.OCISession //session's handle
 	environment    *Environment  //environment
-	connectionPool *ConnectionPool
+	connectionPool ConnectionPool
 	// sessionPool *SessionPool //sessionpool
 	username, password, dsn, version string
 	commitMode                       int64
@@ -140,7 +140,7 @@ func NewConnection(username, password, dsn string, autocommit bool /*commitMode 
 // Connect to the database.
 // good minimal example: http://www.adp-gmbh.ch/ora/misc/oci/index.html
 func (conn *Connection) Connect(mode int64, twophase bool /*, newPassword string*/) error {
-	if conn.connectionPool != nil {
+	if conn.IsConnected() {
 		return nil
 	}
 
@@ -447,19 +447,21 @@ func (conn *Connection) rollback() C.sword {
 
 // Free deallocates the connection, disconnecting from the database if necessary.
 func (conn *Connection) Free(freeEnvironment bool) {
+	conn.srvMtx.Lock()
+	conn.free(freeEnvironment)
+	conn.srvMtx.Unlock()
+}
+
+func (conn *Connection) free(freeEnvironment bool) {
 	if conn.release {
 		// Py_BEGIN_ALLOW_THREADS
-		conn.srvMtx.Lock()
 		conn.rollback()
 		C.OCISessionRelease(conn.handle, conn.environment.errorHandle, nil,
 			0, C.OCI_DEFAULT)
 		// Py_END_ALLOW_THREADS
-		conn.srvMtx.Unlock()
 	} else if !conn.attached {
-		conn.srvMtx.Lock()
 		if conn.sessionHandle != nil {
 			// Py_BEGIN_ALLOW_THREADS
-			conn.rollback()
 			C.OCISessionEnd(conn.handle, conn.environment.errorHandle,
 				conn.sessionHandle, C.OCI_DEFAULT)
 			// Py_END_ALLOW_THREADS
@@ -468,7 +470,6 @@ func (conn *Connection) Free(freeEnvironment bool) {
 			C.OCIServerDetach(conn.serverHandle,
 				conn.environment.errorHandle, C.OCI_DEFAULT)
 		}
-		conn.srvMtx.Unlock()
 	}
 	if conn.sessionHandle != nil {
 		C.OCIHandleFree(unsafe.Pointer(conn.sessionHandle), C.OCI_HTYPE_SESSION)
@@ -492,7 +493,7 @@ func (conn *Connection) Free(freeEnvironment bool) {
 }
 
 // Close the connection, disconnecting from the database.
-func (conn *Connection) Close() (err error) {
+func (conn *Connection) Close() error {
 	if !conn.IsConnected() {
 		return nil //?
 	}
@@ -500,11 +501,19 @@ func (conn *Connection) Close() (err error) {
 	conn.srvMtx.Lock()
 	// if pooled, return to the pool
 	if conn.connectionPool != nil {
-		err = conn.connectionPool.Release(conn)
 		conn.srvMtx.Unlock()
-		return err
+		conn.connectionPool.Put(conn)
+		return nil
 	}
 
+	err := conn.close()
+	conn.srvMtx.Unlock()
+	return err
+}
+
+// close the connection, disconnecting from the database.
+// Does not locks.
+func (conn *Connection) close() (err error) {
 	// perform a rollback
 	conn.rollback()
 
@@ -522,8 +531,7 @@ func (conn *Connection) Close() (err error) {
 			err = err2
 		}
 	}
-	conn.srvMtx.Unlock()
-	conn.Free(true)
+	conn.free(true)
 	return err
 }
 

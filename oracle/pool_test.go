@@ -17,48 +17,45 @@ limitations under the License.
 package oracle
 
 import (
-	"log"
 	"testing"
 )
 
 func TestConnPool(t *testing.T) {
-	c1 := getPooledConn(t)
-	t.Logf("pooled conn 1: %#v", c1)
-	if err := c1.NewCursor().Execute("SELECT 1 FROM DUAL", nil, nil); err != nil {
-		t.Errorf("bad connection: %v", err)
-	}
-	c2 := getPooledConn(t)
-	t.Logf("pooled conn 2: %#v", c2)
-	if err := c1.Close(); err != nil {
-		t.Errorf("close c1: %v", err)
-	}
-	c3 := getPooledConn(t)
-	t.Logf("pooled conn 3: %#v", c3)
-	if err := c2.Close(); err != nil {
-		t.Errorf("close c2: %v", err)
-	}
-	if err := c3.Close(); err != nil {
-		t.Errorf("close c3: %v", err)
-	}
-}
-
-var pool *ConnectionPool
-
-func getPooledConn(t *testing.T) *Connection {
+	type poolFactory func() (ConnectionPool, error)
+	user, passw, sid := SplitDSN(*dsn)
 	var err error
-	if pool == nil {
-		user, passw, sid := SplitDSN(*dsn)
-		pool, err = NewConnectionPool(user, passw, sid, 1, 100, 1)
+	for i, factory := range []poolFactory{
+		func() (ConnectionPool, error) {
+			return NewGoConnectionPool(user, passw, sid, 10)
+		},
+		//func() (ConnectionPool, error) {
+		//return NewORAConnectionPool(user, passw, sid, 1, 10, 1)
+		//},
+	} {
+		pool, err = factory()
 		if err != nil {
-			log.Panicf("error creating connection pool to %s: %v", *dsn, err)
+			t.Errorf("%d. create connection pool: %v", i, err)
+			pool.Close()
+			continue
 		}
+		c1 := getConnection(t)
+		t.Logf("pooled conn 1: %#v", c1)
+		if err := c1.NewCursor().Execute("SELECT 1 FROM DUAL", nil, nil); err != nil {
+			t.Errorf("bad connection: %v", err)
+		}
+		c2 := getConnection(t)
+		t.Logf("pooled conn 2: %#v", c2)
+		if err := c1.Close(); err != nil {
+			t.Errorf("close c1: %v", err)
+		}
+		c3 := getConnection(t)
+		t.Logf("pooled conn 3: %#v", c3)
+		if err := c2.Close(); err != nil {
+			t.Errorf("close c2: %v", err)
+		}
+		if err := c3.Close(); err != nil {
+			t.Errorf("close c3: %v", err)
+		}
+		pool.Close()
 	}
-	conn, err = pool.Acquire()
-	if err != nil {
-		log.Panicf("error acquiring connection from %v: %v", pool, err)
-	}
-	if err = conn.Connect(0, false); err != nil {
-		log.Panicf("error connecting: %s", err)
-	}
-	return conn
 }
