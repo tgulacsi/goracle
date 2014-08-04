@@ -81,3 +81,45 @@ func testConnPool(t *testing.T, p ConnectionPool) {
 	t.Logf("pool stats: %s", pool.Stats())
 
 }
+
+func TestSmallGoPool(t *testing.T) {
+	user, passw, sid := SplitDSN(*dsn)
+	var err error
+	pool, err = NewGoConnectionPool(user, passw, sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	c1 := getConnection(t)
+	st := pool.Stats()
+	t.Logf("1. %s", st)
+	if st.InUse != 1 {
+		t.Errorf("awaited inUse=1, got %d", st.InUse)
+	}
+
+	c2 := getConnection(t)
+	st = pool.Stats()
+	t.Logf("2. %s", st)
+	if st.InUse != 2 {
+		t.Errorf("awaited inUse=2, got %d", st.InUse)
+	}
+
+	if err = c1.Close(); err != nil {
+		t.Errorf("close c1: %v", err)
+	}
+	st = pool.Stats()
+	t.Logf("close c1: %s", st)
+	if st.InUse != 1 || st.InIdle != 1 {
+		t.Errorf("awaited (inUse, inIdle) = (1, 1), got (%d, %d)", st.InUse, st.InIdle)
+	}
+
+	if err = c2.Close(); err != nil {
+		t.Errorf("close c2: %v", err)
+	}
+	st = pool.Stats()
+	t.Logf("close c2: %s", st)
+	if st.InUse != 0 || st.InIdle != 1 || st.PoolTooSmall != 1 {
+		t.Errorf("awaited (inUse, inIdle, PoolTooSmall) = (0, 1, 1), got (%d, %d, %d)", st.InUse, st.InIdle, st.PoolTooSmall)
+	}
+}

@@ -51,7 +51,7 @@ type Statistics struct {
 func (s Statistics) String() string {
 	small := ""
 	if s.PoolTooSmall > 0 {
-		small = " The pool is too small with %d capacity."
+		small = fmt.Sprintf(" The pool is too small with %d capacity.", s.PoolCap)
 	}
 	return fmt.Sprintf("Actually %d connections are in use, %d is idle. Max used %d, max idle was %d. There were %d hits and %d misses.", s.InUse, s.InIdle, s.MaxUse, s.MaxIdle, s.Hits, s.Misses) + small
 }
@@ -97,6 +97,10 @@ func (cp *goConnectionPool) Get() (*Connection, error) {
 }
 
 func (cp *goConnectionPool) Put(conn *Connection) {
+	if !conn.IsConnected() {
+		return
+	}
+	atomic.AddUint32(&cp.stats.InUse, ^uint32(0)) // decremenet
 	select {
 	case cp.pool <- conn:
 		inIdle := atomic.AddUint32(&cp.stats.InIdle, 1)
@@ -107,7 +111,7 @@ func (cp *goConnectionPool) Put(conn *Connection) {
 		// in chan
 	default:
 		atomic.AddUint32(&cp.stats.PoolTooSmall, 1)
-		conn.Close()
+		conn.close()
 	}
 }
 
@@ -117,7 +121,7 @@ func (cp *goConnectionPool) Close() error {
 	}
 	close(cp.pool)
 	for c := range cp.pool {
-		c.Close()
+		c.close()
 	}
 	cp.pool = nil
 	return nil
