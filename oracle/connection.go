@@ -39,6 +39,7 @@ import "C"
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"unsafe"
@@ -494,6 +495,7 @@ func (conn *Connection) free(freeEnvironment bool) {
 
 // Close the connection, disconnecting from the database.
 func (conn *Connection) Close() error {
+	log.Printf("%v.Close, cp=%v", conn, conn.connectionPool)
 	if !conn.IsConnected() {
 		return nil //?
 	}

@@ -17,6 +17,7 @@ limitations under the License.
 package oracle
 
 import (
+	"sync"
 	"testing"
 )
 
@@ -38,17 +39,21 @@ func TestConnPool(t *testing.T) {
 			pool.Close()
 			continue
 		}
+		t.Logf("pool stats: %s", pool.Stats())
 		c1 := getConnection(t)
+		t.Logf("pool stats: %s", pool.Stats())
 		t.Logf("pooled conn 1: %#v", c1)
 		if err := c1.NewCursor().Execute("SELECT 1 FROM DUAL", nil, nil); err != nil {
 			t.Errorf("bad connection: %v", err)
 		}
 		c2 := getConnection(t)
+		t.Logf("pool stats: %s", pool.Stats())
 		t.Logf("pooled conn 2: %#v", c2)
 		if err := c1.Close(); err != nil {
 			t.Errorf("close c1: %v", err)
 		}
 		c3 := getConnection(t)
+		t.Logf("pool stats: %s", pool.Stats())
 		t.Logf("pooled conn 3: %#v", c3)
 		if err := c2.Close(); err != nil {
 			t.Errorf("close c2: %v", err)
@@ -57,9 +62,17 @@ func TestConnPool(t *testing.T) {
 		if err := c3.Close(); err != nil {
 			t.Errorf("close c3: %v", err)
 		}
+		t.Logf("pool stats: %s", pool.Stats())
 
-		TestSimpleBinds(t)
-		go TestSimpleTypes(t)
+		TestOutBinds(t)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			TestSimpleTypes(t)
+		}()
+		wg.Wait()
+		t.Logf("pool stats: %s", pool.Stats())
 
 		pool.Close()
 	}

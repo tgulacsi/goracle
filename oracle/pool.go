@@ -24,6 +24,9 @@ package oracle
 import "C"
 
 import (
+	//"expvar"  // for pool statistics
+	"fmt"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -35,11 +38,28 @@ type ConnectionPool interface {
 	Put(*Connection)
 	// Close closes the pool
 	Close() error
+	// Stats returns pool statistics
+	Stats() Statistics
+}
+
+// Statistics is a collection of pool usage metrics.
+type Statistics struct {
+	InUse, MaxUse, InIdle, MaxIdle, Hits, Misses uint32
+	PoolTooSmall, PoolCap                        uint32
+}
+
+func (s Statistics) String() string {
+	small := ""
+	if s.PoolTooSmall > 0 {
+		small = " The pool is too small with %d capacity."
+	}
+	return fmt.Sprintf("Actually %d connections are in use, %d is idle. Max used %d, max idle was %d. There were %d hits and %d misses.", s.InUse, s.InIdle, s.MaxUse, s.MaxIdle, s.Hits, s.Misses) + small
 }
 
 type goConnectionPool struct {
 	pool                    chan *Connection
 	username, password, sid string
+	stats                   Statistics
 }
 
 // NewGoConnectionPool returns a simple sync.Pool-backed ConnectionPool.
@@ -50,23 +70,43 @@ func NewGoConnectionPool(username, password, sid string, connMax int) (Connectio
 	return &goConnectionPool{
 		pool:     make(chan *Connection, connMax),
 		username: username, password: password, sid: sid,
+		stats: Statistics{PoolCap: uint32(connMax)},
 	}, nil
 }
 
 func (cp *goConnectionPool) Get() (*Connection, error) {
+	inUse := atomic.AddUint32(&cp.stats.InUse, 1)
+	maxUse := atomic.LoadUint32(&cp.stats.MaxUse)
+	if inUse > maxUse {
+		atomic.CompareAndSwapUint32(&cp.stats.MaxUse, maxUse, inUse)
+	}
 	select {
 	case c := <-cp.pool:
+		atomic.AddUint32(&cp.stats.InIdle, ^uint32(0)) // decrement
+		atomic.AddUint32(&cp.stats.Hits, 1)
 		return c, nil
 	default:
-		return NewConnection(cp.username, cp.password, cp.sid, false)
+		atomic.AddUint32(&cp.stats.Misses, 1)
+		c, err := NewConnection(cp.username, cp.password, cp.sid, false)
+		if err != nil {
+			return nil, err
+		}
+		c.connectionPool = cp
+		return c, nil
 	}
 }
 
 func (cp *goConnectionPool) Put(conn *Connection) {
 	select {
 	case cp.pool <- conn:
+		inIdle := atomic.AddUint32(&cp.stats.InIdle, 1)
+		maxIdle := atomic.LoadUint32(&cp.stats.MaxIdle)
+		if inIdle > maxIdle {
+			atomic.CompareAndSwapUint32(&cp.stats.MaxIdle, maxIdle, inIdle)
+		}
 		// in chan
 	default:
+		atomic.AddUint32(&cp.stats.PoolTooSmall, 1)
 		conn.Close()
 	}
 }
@@ -83,12 +123,17 @@ func (cp *goConnectionPool) Close() error {
 	return nil
 }
 
+func (cp goConnectionPool) Stats() Statistics {
+	return cp.stats
+}
+
 // ConnectionPool holds C.OCICPool for connection pooling
 type oraConnectionPool struct {
 	handle      *C.OCICPool
 	authHandle  *C.OCIAuthInfo
 	environment *Environment
 	name        string
+	stats       Statistics
 }
 
 // NewORAConnectionPool returns a new connection pool wrapping an OCI Connection Pool.
@@ -179,6 +224,11 @@ func (cp *oraConnectionPool) Get() (*Connection, error) {
 		"SessionGet"); err != nil {
 		return nil, err
 	}
+	inUse := atomic.AddUint32(&cp.stats.InUse, 1)
+	maxUse := atomic.LoadUint32(&cp.stats.MaxUse)
+	if inUse > maxUse {
+		atomic.CompareAndSwapUint32(&cp.stats.MaxUse, maxUse, inUse)
+	}
 	return conn, nil
 }
 
@@ -186,6 +236,11 @@ func (cp *oraConnectionPool) Get() (*Connection, error) {
 func (cp *oraConnectionPool) Put(conn *Connection) {
 	if conn == nil || conn.handle == nil || conn.connectionPool == nil || !conn.IsConnected() {
 		return
+	}
+	inIdle := atomic.AddUint32(&cp.stats.InIdle, 1)
+	maxIdle := atomic.LoadUint32(&cp.stats.MaxIdle)
+	if inIdle > maxIdle {
+		atomic.CompareAndSwapUint32(&cp.stats.MaxIdle, maxIdle, inIdle)
 	}
 	conn.srvMtx.Lock()
 	defer conn.srvMtx.Unlock()
@@ -198,4 +253,8 @@ func (cp *oraConnectionPool) Put(conn *Connection) {
 		conn.handle = nil
 	}
 	return
+}
+
+func (cp oraConnectionPool) Stats() Statistics {
+	return cp.stats
 }
