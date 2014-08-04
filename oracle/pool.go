@@ -25,16 +25,21 @@ import "C"
 
 import (
 	//"expvar"  // for pool statistics
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/tgulacsi/goracle/third_party/vitess/pools"
+	//"github.com/tgulacsi/goracle/third_party/skynet/pools"
 )
 
-// MinIdleTimeout is the minimal idle timeout.
-const MinIdleTimeout = 5 * time.Second
+// IdleTimeout is the idle timeout.
+const IdleTimeout = 1 * time.Minute
+
+// ErrPoolTimeout is returned by Get if timeout has been set and the operation times out.
+var ErrPoolTimeout = errors.New("pool timed out")
 
 // ConnectionPool is a connection pool interface
 type ConnectionPool interface {
@@ -50,6 +55,10 @@ type ConnectionPool interface {
 
 type vitessPool struct {
 	*pools.ResourcePool
+	getCh   chan maybeConn
+	putCh   chan *Connection
+	closeCh chan struct{}
+	timeout time.Duration
 }
 type vitessConn struct {
 	conn *Connection
@@ -59,12 +68,14 @@ func (vc vitessConn) Close() {
 	_ = vc.conn.close()
 }
 
+type maybeConn struct {
+	conn *Connection
+	err  error
+}
+
 // NewBoundedConnPool returns a new bounded connection pool. It is based on vitess/pools.
-func NewBoundedConnPool(username, password, sid string, connMin, connMax int, idleTimeout time.Duration) (ConnectionPool, error) {
-	if idleTimeout < MinIdleTimeout {
-		idleTimeout = MinIdleTimeout
-	}
-	pool := &vitessPool{}
+func NewBoundedConnPool(username, password, sid string, connMin, connMax int, timeout time.Duration) (ConnectionPool, error) {
+	pool := &vitessPool{timeout: timeout}
 	var factory = pools.Factory(func() (pools.Resource, error) {
 		c, err := NewConnection(username, password, sid, false)
 		if err != nil {
@@ -73,16 +84,90 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, id
 		c.connectionPool = pool
 		return vitessConn{c}, err
 	})
-	pool.ResourcePool = pools.NewResourcePool(factory, connMin, connMax, idleTimeout)
+	if timeout > 0 {
+		pool.getCh = make(chan maybeConn)
+		pool.putCh = make(chan *Connection)
+		pool.closeCh = make(chan struct{})
+
+		go func() {
+		Loop:
+			for {
+				res, err := pool.ResourcePool.Get()
+				var c *Connection
+				if err == nil {
+					c = res.(vitessConn).conn
+					c.connectionPool = pool
+				}
+				// see http://dave.cheney.net/2014/03/19/channel-axioms
+				select {
+				case <-pool.closeCh:
+					if c != nil {
+						c.close()
+					}
+					break Loop
+				case pool.getCh <- maybeConn{c, err}:
+				}
+			}
+		}()
+		go func() {
+		Loop:
+			for {
+				select {
+				case <-pool.closeCh:
+					break Loop
+				case c := <-pool.putCh:
+					func(c *Connection) {
+						defer func() {
+							recover()
+						}()
+						if !c.IsConnected() {
+							pool.ResourcePool.Put(nil)
+						} else {
+							c.connectionPool = nil
+							pool.ResourcePool.Put(vitessConn{c})
+						}
+					}(c)
+				}
+			}
+		}()
+	}
+	pool.ResourcePool = pools.NewResourcePool(factory, connMin, connMax, IdleTimeout)
 	return pool, nil
 }
 
 func (p *vitessPool) Close() error {
-	p.ResourcePool.Close()
+	if p.closeCh != nil {
+		close(p.getCh)
+		close(p.putCh)
+		go func() {
+			for i := 0; i < 2; i++ {
+				p.closeCh <- struct{}{}
+			}
+		}()
+	}
+	go p.ResourcePool.Close()
+	// FIXME(tgulacsi): understand what is Capacity and Available!
+	go func() {
+		defer func() {
+			recover()
+		}()
+		for i := p.ResourcePool.Capacity() - p.ResourcePool.Available(); i >= 0; i-- {
+			p.ResourcePool.Put(nil)
+		}
+	}()
 	return nil
 }
 
 func (p *vitessPool) Get() (*Connection, error) {
+	if p.getCh != nil {
+		select {
+		case mc := <-p.getCh:
+			return mc.conn, mc.err
+		case <-time.After(p.timeout):
+			return nil, ErrPoolTimeout
+		}
+	}
+
 	res, err := p.ResourcePool.Get()
 	if err != nil {
 		return nil, err
@@ -91,6 +176,16 @@ func (p *vitessPool) Get() (*Connection, error) {
 }
 
 func (p *vitessPool) Put(conn *Connection) {
+	if p.putCh != nil {
+		select {
+		case p.putCh <- conn:
+			return
+		case <-time.After(p.timeout):
+			conn.close()
+			return
+		}
+	}
+
 	p.ResourcePool.Put(vitessConn{conn})
 }
 

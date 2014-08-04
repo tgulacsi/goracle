@@ -25,9 +25,19 @@ import (
 
 var poolSize = 10
 
+func TestBoundedConnPool(t *testing.T) {
+	user, passw, sid := SplitDSN(*dsn)
+	pool, err := NewBoundedConnPool(user, passw, sid, 2, poolSize, 1*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	testConnPool(t, pool)
+}
+
 func TestGoConnPool(t *testing.T) {
 	user, passw, sid := SplitDSN(*dsn)
-	pool, err := NewGoConnectionPool(user, passw, sid, 10)
+	pool, err := NewGoConnectionPool(user, passw, sid, poolSize)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +47,7 @@ func TestGoConnPool(t *testing.T) {
 
 func TestORAConnPool(t *testing.T) {
 	user, passw, sid := SplitDSN(*dsn)
-	pool, err := NewORAConnectionPool(user, passw, sid, 1, 10, 1)
+	pool, err := NewORAConnectionPool(user, passw, sid, 1, poolSize, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
