@@ -17,8 +17,10 @@ limitations under the License.
 package oracle
 
 import (
+	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 var poolSize = 10
@@ -121,5 +123,38 @@ func TestSmallGoPool(t *testing.T) {
 	t.Logf("close c2: %s", st)
 	if st.InUse != 0 || st.InIdle != 1 || st.PoolTooSmall != 1 {
 		t.Errorf("awaited (inUse, inIdle, PoolTooSmall) = (0, 1, 1), got (%d, %d, %d)", st.InUse, st.InIdle, st.PoolTooSmall)
+	}
+}
+
+func TestSmallORAConnPool(t *testing.T) {
+	user, passw, sid := SplitDSN(*dsn)
+	var err error
+	pool, err = NewORAConnectionPool(user, passw, sid, 0, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	conns := []*Connection{getConnection(t), nil}
+	st := pool.Stats()
+	t.Logf("1. %s", st)
+	if st.InUse != 1 {
+		t.Errorf("awaited inUse=1, got %d", st.InUse)
+	}
+
+	ch := make(chan struct{})
+	go func() {
+		conns[1] = getConnection(t)
+		ch <- struct{}{}
+	}()
+	select {
+	case <-ch:
+		handles := make([]string, len(conns))
+		for i, c := range conns {
+			handles[i] = fmt.Sprintf("%p", c.handle)
+		}
+		t.Errorf("pool got beyond its capacity! awaited 1 connections, got %#v", handles)
+		time.Sleep(10 * time.Second)
+	case <-time.After(time.Second):
 	}
 }

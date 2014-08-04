@@ -27,8 +27,14 @@ import (
 	//"expvar"  // for pool statistics
 	"fmt"
 	"sync/atomic"
+	"time"
 	"unsafe"
+
+	"github.com/tgulacsi/goracle/third_party/vitess/pools"
 )
+
+// MinIdleTimeout is the minimal idle timeout.
+const MinIdleTimeout = 5 * time.Second
 
 // ConnectionPool is a connection pool interface
 type ConnectionPool interface {
@@ -42,10 +48,69 @@ type ConnectionPool interface {
 	Stats() Statistics
 }
 
+type vitessPool struct {
+	*pools.ResourcePool
+}
+type vitessConn struct {
+	conn *Connection
+}
+
+func (vc vitessConn) Close() {
+	_ = vc.conn.close()
+}
+
+// NewBoundedConnPool returns a new bounded connection pool. It is based on vitess/pools.
+func NewBoundedConnPool(username, password, sid string, connMin, connMax int, idleTimeout time.Duration) (ConnectionPool, error) {
+	if idleTimeout < MinIdleTimeout {
+		idleTimeout = MinIdleTimeout
+	}
+	pool := &vitessPool{}
+	var factory = pools.Factory(func() (pools.Resource, error) {
+		c, err := NewConnection(username, password, sid, false)
+		if err != nil {
+			return nil, err
+		}
+		c.connectionPool = pool
+		return vitessConn{c}, err
+	})
+	pool.ResourcePool = pools.NewResourcePool(factory, connMin, connMax, idleTimeout)
+	return pool, nil
+}
+
+func (p *vitessPool) Close() error {
+	p.ResourcePool.Close()
+	return nil
+}
+
+func (p *vitessPool) Get() (*Connection, error) {
+	res, err := p.ResourcePool.Get()
+	if err != nil {
+		return nil, err
+	}
+	return res.(vitessConn).conn, nil
+}
+
+func (p *vitessPool) Put(conn *Connection) {
+	p.ResourcePool.Put(vitessConn{conn})
+}
+
+func (p *vitessPool) Stats() Statistics {
+	return Statistics{InIdle: uint32(p.ResourcePool.Capacity()), PoolCap: uint32(p.ResourcePool.MaxCap())}
+}
+
 // Statistics is a collection of pool usage metrics.
 type Statistics struct {
 	InUse, MaxUse, InIdle, MaxIdle, Hits, Misses uint32
 	PoolTooSmall, PoolCap                        uint32
+}
+
+// add adds d to c, and adjusts m as max.
+func add(c *uint32, d uint32, m *uint32) {
+	act := atomic.AddUint32(c, d)
+	max := atomic.LoadUint32(m)
+	if act > max {
+		atomic.CompareAndSwapUint32(m, max, act)
+	}
 }
 
 func (s Statistics) String() string {
@@ -62,24 +127,21 @@ type goConnectionPool struct {
 	stats                   Statistics
 }
 
-// NewGoConnectionPool returns a simple sync.Pool-backed ConnectionPool.
-func NewGoConnectionPool(username, password, sid string, connMax int) (ConnectionPool, error) {
-	if connMax <= 0 {
-		connMax = 999
+// NewGoConnectionPool returns a simple caching pool, with limited number of idle connections,
+// but unbounded any other way.
+func NewGoConnectionPool(username, password, sid string, maxIdle int) (ConnectionPool, error) {
+	if maxIdle <= 0 {
+		maxIdle = 999
 	}
 	return &goConnectionPool{
-		pool:     make(chan *Connection, connMax),
+		pool:     make(chan *Connection, maxIdle),
 		username: username, password: password, sid: sid,
-		stats: Statistics{PoolCap: uint32(connMax)},
+		stats: Statistics{PoolCap: uint32(maxIdle)},
 	}, nil
 }
 
 func (cp *goConnectionPool) Get() (*Connection, error) {
-	inUse := atomic.AddUint32(&cp.stats.InUse, 1)
-	maxUse := atomic.LoadUint32(&cp.stats.MaxUse)
-	if inUse > maxUse {
-		atomic.CompareAndSwapUint32(&cp.stats.MaxUse, maxUse, inUse)
-	}
+	add(&cp.stats.InUse, 1, &cp.stats.MaxUse)
 	select {
 	case c := <-cp.pool:
 		atomic.AddUint32(&cp.stats.InIdle, ^uint32(0)) // decrement
@@ -103,11 +165,7 @@ func (cp *goConnectionPool) Put(conn *Connection) {
 	atomic.AddUint32(&cp.stats.InUse, ^uint32(0)) // decremenet
 	select {
 	case cp.pool <- conn:
-		inIdle := atomic.AddUint32(&cp.stats.InIdle, 1)
-		maxIdle := atomic.LoadUint32(&cp.stats.MaxIdle)
-		if inIdle > maxIdle {
-			atomic.CompareAndSwapUint32(&cp.stats.MaxIdle, maxIdle, inIdle)
-		}
+		add(&cp.stats.InIdle, 1, &cp.stats.MaxIdle)
 		// in chan
 	default:
 		atomic.AddUint32(&cp.stats.PoolTooSmall, 1)
@@ -184,6 +242,13 @@ func NewORAConnectionPool(username, password, dblink string, connMin, connMax, c
 		nameP   unsafe.Pointer
 		nameLen C.sb4
 	)
+	if CTrace {
+		ctrace("OCIConnectionPoolCreate(env=%p, err=%p, handle=%p, namep, namelen, dblink=%s, len(dblink)=%d connMin=%d, connMax=%d, connIncr=%d, username, password, OCI_DEFAULT)",
+			env.handle, env.errorHandle, pool.handle,
+			dblink, len(dblink),
+			C.ub4(connMin), C.ub4(connMax), C.ub4(connIncr))
+
+	}
 	if err = env.CheckStatus(
 		C.OCIConnectionPoolCreate(env.handle, env.errorHandle, pool.handle,
 			(**C.OraText)(unsafe.Pointer(&nameP)), &nameLen,
@@ -197,6 +262,9 @@ func NewORAConnectionPool(username, password, dblink string, connMin, connMax, c
 	}
 	pool.name = C.GoStringN((*C.char)(nameP), C.int(nameLen))
 	pool.environment = env
+	if CTrace {
+		ctrace("pool.name=%q", pool.name)
+	}
 
 	return &pool, nil
 }
@@ -228,11 +296,7 @@ func (cp *oraConnectionPool) Get() (*Connection, error) {
 		"SessionGet"); err != nil {
 		return nil, err
 	}
-	inUse := atomic.AddUint32(&cp.stats.InUse, 1)
-	maxUse := atomic.LoadUint32(&cp.stats.MaxUse)
-	if inUse > maxUse {
-		atomic.CompareAndSwapUint32(&cp.stats.MaxUse, maxUse, inUse)
-	}
+	add(&cp.stats.InUse, 1, &cp.stats.MaxUse)
 	return conn, nil
 }
 
@@ -241,11 +305,7 @@ func (cp *oraConnectionPool) Put(conn *Connection) {
 	if conn == nil || conn.handle == nil || conn.connectionPool == nil || !conn.IsConnected() {
 		return
 	}
-	inIdle := atomic.AddUint32(&cp.stats.InIdle, 1)
-	maxIdle := atomic.LoadUint32(&cp.stats.MaxIdle)
-	if inIdle > maxIdle {
-		atomic.CompareAndSwapUint32(&cp.stats.MaxIdle, maxIdle, inIdle)
-	}
+	add(&cp.stats.InIdle, 1, &cp.stats.MaxIdle)
 	conn.srvMtx.Lock()
 	defer conn.srvMtx.Unlock()
 	err := cp.environment.CheckStatus(
