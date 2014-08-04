@@ -21,59 +21,63 @@ import (
 	"testing"
 )
 
-func TestConnPool(t *testing.T) {
-	type poolFactory func() (ConnectionPool, error)
+var poolSize = 10
+
+func TestGoConnPool(t *testing.T) {
 	user, passw, sid := SplitDSN(*dsn)
-	var err error
-	for i, factory := range []poolFactory{
-		func() (ConnectionPool, error) {
-			return NewGoConnectionPool(user, passw, sid, 10)
-		},
-		//func() (ConnectionPool, error) {
-		//return NewORAConnectionPool(user, passw, sid, 1, 10, 1)
-		//},
-	} {
-		pool, err = factory()
-		if err != nil {
-			t.Errorf("%d. create connection pool: %v", i, err)
-			pool.Close()
-			continue
-		}
-		t.Logf("pool stats: %s", pool.Stats())
-		c1 := getConnection(t)
-		t.Logf("pool stats: %s", pool.Stats())
-		t.Logf("pooled conn 1: %#v", c1)
-		if err := c1.NewCursor().Execute("SELECT 1 FROM DUAL", nil, nil); err != nil {
-			t.Errorf("bad connection: %v", err)
-		}
-		c2 := getConnection(t)
-		t.Logf("pool stats: %s", pool.Stats())
-		t.Logf("pooled conn 2: %#v", c2)
-		if err := c1.Close(); err != nil {
-			t.Errorf("close c1: %v", err)
-		}
-		c3 := getConnection(t)
-		t.Logf("pool stats: %s", pool.Stats())
-		t.Logf("pooled conn 3: %#v", c3)
-		if err := c2.Close(); err != nil {
-			t.Errorf("close c2: %v", err)
-		}
-
-		if err := c3.Close(); err != nil {
-			t.Errorf("close c3: %v", err)
-		}
-		t.Logf("pool stats: %s", pool.Stats())
-
-		TestOutBinds(t)
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			TestSimpleTypes(t)
-		}()
-		wg.Wait()
-		t.Logf("pool stats: %s", pool.Stats())
-
-		pool.Close()
+	pool, err := NewGoConnectionPool(user, passw, sid, 10)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer pool.Close()
+	testConnPool(t, pool)
+}
+
+func TestORAConnPool(t *testing.T) {
+	user, passw, sid := SplitDSN(*dsn)
+	pool, err := NewORAConnectionPool(user, passw, sid, 1, 10, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	testConnPool(t, pool)
+}
+
+func testConnPool(t *testing.T, p ConnectionPool) {
+	pool = p // global pool, used by getConnection!
+	t.Logf("pool stats: %s", pool.Stats())
+	c1 := getConnection(t)
+	t.Logf("pool stats: %s", pool.Stats())
+	t.Logf("pooled conn 1: %#v", c1)
+	if err := c1.NewCursor().Execute("SELECT 1 FROM DUAL", nil, nil); err != nil {
+		t.Errorf("bad connection: %v", err)
+	}
+	c2 := getConnection(t)
+	t.Logf("pool stats: %s", pool.Stats())
+	t.Logf("pooled conn 2: %#v", c2)
+	if err := c1.Close(); err != nil {
+		t.Errorf("close c1: %v", err)
+	}
+	c3 := getConnection(t)
+	t.Logf("pool stats: %s", pool.Stats())
+	t.Logf("pooled conn 3: %#v", c3)
+	if err := c2.Close(); err != nil {
+		t.Errorf("close c2: %v", err)
+	}
+
+	if err := c3.Close(); err != nil {
+		t.Errorf("close c3: %v", err)
+	}
+	t.Logf("pool stats: %s", pool.Stats())
+
+	TestOutBinds(t)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		TestSimpleTypes(t)
+	}()
+	wg.Wait()
+	t.Logf("pool stats: %s", pool.Stats())
+
 }
