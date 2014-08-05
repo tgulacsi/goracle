@@ -142,15 +142,6 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 }
 
 func (p *vitessPool) Close() error {
-	if p.closeCh != nil {
-		close(p.getCh)
-		close(p.putCh)
-		go func() {
-			for i := 0; i < 2; i++ {
-				p.closeCh <- struct{}{}
-			}
-		}()
-	}
 	go p.ResourcePool.Close()
 	go func() {
 		defer func() {
@@ -160,6 +151,17 @@ func (p *vitessPool) Close() error {
 			p.ResourcePool.Put(nil)
 		}
 	}()
+	if p.closeCh != nil {
+		go func() {
+			for i := 0; i < 2; i++ {
+				p.closeCh <- struct{}{}
+			}
+		}()
+		close(p.closeCh)
+		p.closeCh = nil
+		close(p.getCh)
+		close(p.putCh)
+	}
 	return nil
 }
 

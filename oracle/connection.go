@@ -501,8 +501,10 @@ func (conn *Connection) Close() error {
 	conn.srvMtx.Lock()
 	// if pooled, return to the pool
 	if conn.connectionPool != nil {
+		p := conn.connectionPool
+		conn.connectionPool = nil // to avoid this branch
 		conn.srvMtx.Unlock()
-		conn.connectionPool.Put(conn)
+		p.Put(conn)
 		return nil
 	}
 

@@ -27,14 +27,16 @@ var poolSize = 10
 
 func TestBoundedConnPool(t *testing.T) {
 	user, passw, sid := SplitDSN(*dsn)
-	pool, err := NewBoundedConnPool(user, passw, sid, 2, poolSize, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	testConnPool(t, pool)
+	/*
+		pool, err := NewBoundedConnPool(user, passw, sid, 2, poolSize, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pool.Close()
+		testConnPool(t, pool)
+	*/
 
-	pool, err = NewBoundedConnPool(user, passw, sid, 2, poolSize, 1*time.Minute)
+	pool, err := NewBoundedConnPool(user, passw, sid, 2, poolSize, 1*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +100,6 @@ func testConnPool(t *testing.T, p ConnectionPool) {
 	}()
 	wg.Wait()
 	t.Logf("pool stats: %s", pool.Stats())
-
 }
 
 func TestSmallGoPool(t *testing.T) {
