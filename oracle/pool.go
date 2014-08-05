@@ -131,6 +131,12 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 			}
 		}()
 	}
+	if connMin < 0 {
+		connMin = 1
+	}
+	if connMax < connMin {
+		connMax = connMin
+	}
 	pool.ResourcePool = pools.NewResourcePool(factory, connMin, connMax, IdleTimeout)
 	return pool, nil
 }
@@ -146,12 +152,11 @@ func (p *vitessPool) Close() error {
 		}()
 	}
 	go p.ResourcePool.Close()
-	// FIXME(tgulacsi): understand what is Capacity and Available!
 	go func() {
 		defer func() {
 			recover()
 		}()
-		for i := p.ResourcePool.Capacity() - p.ResourcePool.Available(); i >= 0; i-- {
+		for i := p.ResourcePool.Capacity() - p.ResourcePool.Available(); i > 0; i-- {
 			p.ResourcePool.Put(nil)
 		}
 	}()

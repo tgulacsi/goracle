@@ -27,7 +27,14 @@ var poolSize = 10
 
 func TestBoundedConnPool(t *testing.T) {
 	user, passw, sid := SplitDSN(*dsn)
-	pool, err := NewBoundedConnPool(user, passw, sid, 2, poolSize, 1*time.Minute)
+	pool, err := NewBoundedConnPool(user, passw, sid, 2, poolSize, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	testConnPool(t, pool)
+
+	pool, err = NewBoundedConnPool(user, passw, sid, 2, poolSize, 1*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +161,11 @@ func TestSmallORAConnPool(t *testing.T) {
 
 	ch := make(chan struct{})
 	go func() {
-		conns[1] = getConnection(t)
+		var err error
+		if conns[1], err = pool.Get(); err != nil {
+			t.Errorf("error geting connection from pool: %v", err)
+			t.FailNow()
+		}
 		ch <- struct{}{}
 	}()
 	select {
@@ -166,5 +177,29 @@ func TestSmallORAConnPool(t *testing.T) {
 		t.Errorf("pool got beyond its capacity! awaited 1 connections, got %#v", handles)
 		time.Sleep(10 * time.Second)
 	case <-time.After(time.Second):
+	}
+}
+
+func TestSmallBoundedPool(t *testing.T) {
+	user, passw, sid := SplitDSN(*dsn)
+	var err error
+	pool, err = NewBoundedConnPool(user, passw, sid, 1, 1, 1*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	conns := []*Connection{getConnection(t), nil}
+	st := pool.Stats()
+	t.Logf("1. %s", st)
+
+	conns[1], err = pool.Get()
+	t.Logf("error for overacquiring the pool: %v", err)
+	st = pool.Stats()
+	t.Logf("2. %s", st)
+	if err == nil {
+		t.Errorf("pool got beyond its capacity! awaited 1 connections, got %#v", conns)
+	} else if err != ErrPoolTimeout {
+		t.Errorf("pool error: %v", err)
 	}
 }
