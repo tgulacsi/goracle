@@ -205,7 +205,7 @@ func (cur *Cursor) NewVar(value interface{}, /*inconverter, outconverter, typena
 	if varType.isVariableLength && size == 0 {
 		size = varType.size
 	}
-	log.Printf("varType=%v size=%d numElements=%d", varType, size, numElements)
+	//log.Printf("varType=%v size=%d numElements=%d", varType, size, numElements)
 	/*
 	   if (type == (PyObject*) &g_ObjectVarType && !typeNameObj) {
 	       PyErr_SetString(PyExc_TypeError,

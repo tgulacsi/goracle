@@ -27,6 +27,7 @@ import (
 	//"expvar"  // for pool statistics
 	"errors"
 	"fmt"
+	"log"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -58,6 +59,7 @@ type vitessPool struct {
 	putCh   chan *Connection
 	closeCh chan struct{}
 	timeout time.Duration
+	closed  bool
 }
 type vitessConn struct {
 	conn *Connection
@@ -83,6 +85,14 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 		c.connectionPool = pool
 		return vitessConn{c}, err
 	})
+	if connMin < 0 {
+		connMin = 1
+	}
+	if connMax < connMin {
+		connMax = connMin
+	}
+	rp := pools.NewResourcePool(factory, connMin, connMax, IdleTimeout)
+	pool.ResourcePool = rp
 	if timeout > 0 {
 		pool.getCh = make(chan maybeConn)
 		pool.putCh = make(chan *Connection)
@@ -92,7 +102,7 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 		go func() {
 		Loop:
 			for {
-				res, err := pool.ResourcePool.Get()
+				res, err := rp.Get()
 				var c *Connection
 				if err == nil {
 					c = res.(vitessConn).conn
@@ -125,35 +135,28 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 							recover()
 						}()
 						if !c.IsConnected() {
-							pool.ResourcePool.Put(nil)
+							rp.Put(nil)
 						} else {
 							c.connectionPool = nil
-							pool.ResourcePool.Put(vitessConn{c})
+							rp.Put(vitessConn{c})
 						}
 					}(c)
 				}
 			}
 		}()
 	}
-	if connMin < 0 {
-		connMin = 1
-	}
-	if connMax < connMin {
-		connMax = connMin
-	}
-	pool.ResourcePool = pools.NewResourcePool(factory, connMin, connMax, IdleTimeout)
 	// ResourcePool discards old connections only on get
 	go func() {
 		for _ = range time.Tick(IdleTimeout) {
-			if pool.ResourcePool.IsClosed() {
+			if rp.IsClosed() {
 				return
 			}
-			for i := int64(0); i < pool.ResourcePool.Available(); i++ {
-				res, err := pool.ResourcePool.TryGet()
+			for i := int64(0); i < rp.Available(); i++ {
+				res, err := rp.TryGet()
 				if err != nil || res == nil {
 					break
 				}
-				pool.ResourcePool.Put(res)
+				rp.Put(res)
 			}
 		}
 	}()
@@ -170,14 +173,13 @@ func (p *vitessPool) Close() error {
 			p.ResourcePool.Put(nil)
 		}
 	}()
-	if p.closeCh != nil {
+	if !p.closed {
 		go func() {
 			for i := 0; i < 2; i++ {
 				p.closeCh <- struct{}{}
 			}
 		}()
-		close(p.closeCh)
-		p.closeCh = nil
+		p.closed = true
 	}
 	return nil
 }
@@ -386,6 +388,13 @@ func NewORAConnectionPool(username, password, dblink string, connMin, connMax, c
 		ctrace("pool.name=%q", pool.name)
 	}
 
+	it := C.ub4(IdleTimeout / time.Second)
+	if err = env.AttrSet(unsafe.Pointer(pool.handle), C.OCI_HTYPE_CPOOL,
+		C.OCI_ATTR_CONN_TIMEOUT, unsafe.Pointer(&it), 0,
+	); err != nil {
+		return nil, err
+	}
+
 	return &pool, nil
 }
 
@@ -407,6 +416,11 @@ func (cp *oraConnectionPool) Close() error {
 // On Close of this returned connection, it will only released back to the pool.
 func (cp *oraConnectionPool) Get() (*Connection, error) {
 	conn := &Connection{connectionPool: cp, environment: cp.environment}
+	if CTrace {
+		ctrace("OCISessionGet(env=%p, errHndl=%p, conn=%p, auth=%p, name=%q, nameLen=%d, ... OCI_SESSGET_CPOOL)", cp.environment.handle, cp.environment.errorHandle,
+			&conn.handle, cp.authHandle,
+			cp.name, C.ub4(len(cp.name)))
+	}
 	if err := cp.environment.CheckStatus(
 		C.OCISessionGet(cp.environment.handle, cp.environment.errorHandle,
 			&conn.handle, cp.authHandle,
@@ -432,6 +446,7 @@ func (cp *oraConnectionPool) Put(conn *Connection) {
 		C.OCISessionRelease(conn.handle, cp.environment.errorHandle, nil, 0, C.OCI_DEFAULT),
 		"SessionRelease")
 	if err != nil {
+		log.Printf("SessionRelease ERROR: %v", err)
 		conn.connectionPool = nil
 		conn.close()
 		conn.handle = nil

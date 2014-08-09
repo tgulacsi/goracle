@@ -17,7 +17,6 @@ limitations under the License.
 package oracle
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -153,32 +152,7 @@ func TestSmallORAConnPool(t *testing.T) {
 	}
 	defer pool.Close()
 
-	conns := []*Connection{getConnection(t), nil}
-	st := pool.Stats()
-	t.Logf("1. %s", st)
-	if st.InUse != 1 {
-		t.Errorf("awaited inUse=1, got %d", st.InUse)
-	}
-
-	ch := make(chan struct{})
-	go func() {
-		var err error
-		if conns[1], err = pool.Get(); err != nil {
-			t.Errorf("error geting connection from pool: %v", err)
-			t.FailNow()
-		}
-		ch <- struct{}{}
-	}()
-	select {
-	case <-ch:
-		handles := make([]string, len(conns))
-		for i, c := range conns {
-			handles[i] = fmt.Sprintf("%p", c.handle)
-		}
-		t.Errorf("pool got beyond its capacity! awaited 1 connections, got %#v", handles)
-		time.Sleep(10 * time.Second)
-	case <-time.After(time.Second):
-	}
+	testSmallPool(t, pool)
 }
 
 func TestSmallBoundedPool(t *testing.T) {
@@ -190,17 +164,36 @@ func TestSmallBoundedPool(t *testing.T) {
 	}
 	defer pool.Close()
 
-	conns := []*Connection{getConnection(t), nil}
+	testSmallPool(t, pool)
+}
+
+func testSmallPool(t *testing.T, pool ConnectionPool) {
+	conns := make([]*Connection, 1, 10)
+	var err error
+
+	if conns[0], err = pool.Get(); err != nil {
+		t.Errorf("error getting first connection of pool %s: %v", pool, err)
+		return
+	}
 	st := pool.Stats()
 	t.Logf("1. %s", st)
 
-	conns[1], err = pool.Get()
-	t.Logf("error for overacquiring the pool: %v", err)
-	st = pool.Stats()
-	t.Logf("2. %s", st)
-	if err == nil {
-		t.Errorf("pool got beyond its capacity! awaited 1 connections, got %#v", conns)
-	} else if err != ErrPoolTimeout {
-		t.Errorf("pool error: %v", err)
+	for i := 1; i < cap(conns); i++ {
+		c, err := pool.Get()
+		if err != nil {
+			t.Logf("error for overacquiring the pool %s: %v", pool, err)
+			break
+		}
+		conns = append(conns, c)
+		st = pool.Stats()
+		t.Logf("%d. %s", i+1, st)
+		if err == nil {
+			t.Errorf("pool %s got beyond its capacity! awaited 1 connections, got %d", pool, len(conns))
+		} else if err != ErrPoolTimeout {
+			t.Errorf("pool %s error: %v", pool, err)
+		} else {
+			break
+		}
+		time.Sleep(3 * time.Second)
 	}
 }
