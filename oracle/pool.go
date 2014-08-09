@@ -32,7 +32,6 @@ import (
 	"unsafe"
 
 	"github.com/tgulacsi/goracle/third_party/vitess/pools"
-	//"github.com/tgulacsi/goracle/third_party/skynet/pools"
 )
 
 // IdleTimeout is the idle timeout.
@@ -89,6 +88,7 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 		pool.putCh = make(chan *Connection)
 		pool.closeCh = make(chan struct{})
 
+		// GET
 		go func() {
 		Loop:
 			for {
@@ -101,6 +101,7 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 				// see http://dave.cheney.net/2014/03/19/channel-axioms
 				select {
 				case <-pool.closeCh:
+					close(pool.putCh)
 					if c != nil {
 						c.close()
 					}
@@ -109,11 +110,14 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 				}
 			}
 		}()
+
+		// PUT
 		go func() {
 		Loop:
 			for {
 				select {
 				case <-pool.closeCh:
+					close(pool.getCh)
 					break Loop
 				case c := <-pool.putCh:
 					func(c *Connection) {
@@ -138,6 +142,21 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 		connMax = connMin
 	}
 	pool.ResourcePool = pools.NewResourcePool(factory, connMin, connMax, IdleTimeout)
+	// ResourcePool discards old connections only on get
+	go func() {
+		for _ = range time.Tick(IdleTimeout) {
+			if pool.ResourcePool.IsClosed() {
+				return
+			}
+			for i := int64(0); i < pool.ResourcePool.Available(); i++ {
+				res, err := pool.ResourcePool.TryGet()
+				if err != nil || res == nil {
+					break
+				}
+				pool.ResourcePool.Put(res)
+			}
+		}
+	}()
 	return pool, nil
 }
 
@@ -159,8 +178,6 @@ func (p *vitessPool) Close() error {
 		}()
 		close(p.closeCh)
 		p.closeCh = nil
-		close(p.getCh)
-		close(p.putCh)
 	}
 	return nil
 }
@@ -292,6 +309,7 @@ func (cp goConnectionPool) Stats() Statistics {
 }
 
 // ConnectionPool holds C.OCICPool for connection pooling
+// - see http://docs.oracle.com/cd/E11882_01/appdev.112/e10646/oci09adv.htm#LNOCI16602
 type oraConnectionPool struct {
 	handle      *C.OCICPool
 	authHandle  *C.OCIAuthInfo
