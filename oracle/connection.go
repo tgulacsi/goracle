@@ -633,9 +633,10 @@ func (conn *Connection) NlsSettings(cur *Cursor) (oci, client, database string, 
 	}
 	params := make(map[string]string, 3)
 	for err == nil {
-		if row, err = cur.FetchOne(); err == nil {
-			params[row[0].(string)] = row[1].(string)
+		if row, err = cur.FetchOne(); err != nil || len(row) != 2 {
+			break
 		}
+		params[row[0].(string)] = row[1].(string)
 	}
 	err = nil
 	database = params["NLS_LANGUAGE"] + "_" + params["NLS_TERRITORY"] + "." + params["NLS_CHARACTERSET"]

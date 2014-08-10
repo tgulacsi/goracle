@@ -63,6 +63,16 @@ func TestORAConnPool(t *testing.T) {
 	testConnPool(t, pool)
 }
 
+func TestORASessPool(t *testing.T) {
+	user, passw, sid := SplitDSN(*dsn)
+	pool, err := NewORASessionPool(user, passw, sid, 1, poolSize, 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	testConnPool(t, pool)
+}
+
 func testConnPool(t *testing.T, p ConnectionPool) {
 	pool = p // global pool, used by getConnection!
 	t.Logf("pool stats: %s", pool.Stats())
@@ -143,6 +153,18 @@ func TestSmallGoPool(t *testing.T) {
 	}
 }
 
+func TestSmallBoundedPool(t *testing.T) {
+	user, passw, sid := SplitDSN(*dsn)
+	var err error
+	pool, err = NewBoundedConnPool(user, passw, sid, 1, 1, 1*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	testSmallPool(t, pool)
+}
+
 func TestSmallORAConnPool(t *testing.T) {
 	user, passw, sid := SplitDSN(*dsn)
 	var err error
@@ -155,10 +177,10 @@ func TestSmallORAConnPool(t *testing.T) {
 	testSmallPool(t, pool)
 }
 
-func TestSmallBoundedPool(t *testing.T) {
+func TestSmallORASessPool(t *testing.T) {
 	user, passw, sid := SplitDSN(*dsn)
 	var err error
-	pool, err = NewBoundedConnPool(user, passw, sid, 1, 1, 1*time.Second)
+	pool, err = NewORASessionPool(user, passw, sid, 0, 1, 1, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,22 +200,34 @@ func testSmallPool(t *testing.T, pool ConnectionPool) {
 	st := pool.Stats()
 	t.Logf("1. %s", st)
 
+	type maybeConn struct {
+		c   *Connection
+		err error
+	}
+	connCh := make(chan maybeConn)
+
+Loop:
 	for i := 1; i < cap(conns); i++ {
-		c, err := pool.Get()
-		if err != nil {
-			t.Logf("error for overacquiring the pool %s: %v", pool, err)
-			break
+		go func() {
+			c, err := pool.Get()
+			connCh <- maybeConn{c: c, err: err}
+		}()
+		select {
+		case mc := <-connCh:
+			if mc.err == nil {
+				t.Errorf("pool %s got beyond its capacity! awaited 1 connections, got %d", pool, len(conns))
+				conns = append(conns, mc.c)
+			} else if err == ErrPoolTimeout {
+				return
+			} else {
+				t.Logf("error for overacquiring the pool %s: %v", pool, err)
+				break Loop
+			}
+		case <-time.After(10 * time.Second):
+			t.Logf("timeout on overaquiring the pool")
+			break Loop
 		}
-		conns = append(conns, c)
 		st = pool.Stats()
 		t.Logf("%d. %s", i+1, st)
-		if err == nil {
-			t.Errorf("pool %s got beyond its capacity! awaited 1 connections, got %d", pool, len(conns))
-		} else if err != ErrPoolTimeout {
-			t.Errorf("pool %s error: %v", pool, err)
-		} else {
-			break
-		}
-		time.Sleep(3 * time.Second)
 	}
 }
