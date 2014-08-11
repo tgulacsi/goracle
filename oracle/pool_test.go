@@ -35,7 +35,7 @@ func TestBoundedConnPool(t *testing.T) {
 		testConnPool(t, pool)
 	*/
 
-	pool, err := NewBoundedConnPool(user, passw, sid, 2, poolSize, 1*time.Second)
+	pool, err := NewBoundedConnPool(user, passw, sid, poolSize, 1*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,19 +76,34 @@ func TestORASessPool(t *testing.T) {
 func testConnPool(t *testing.T, p ConnectionPool) {
 	pool = p // global pool, used by getConnection!
 	t.Logf("pool stats: %s", pool.Stats())
-	c1 := getConnection(t)
+	c1, err := pool.Get()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer c1.Close()
 	t.Logf("pool stats: %s", pool.Stats())
 	t.Logf("pooled conn 1: %#v", c1)
 	if err := c1.NewCursor().Execute("SELECT 1 FROM DUAL", nil, nil); err != nil {
 		t.Errorf("bad connection: %v", err)
 	}
-	c2 := getConnection(t)
+	c2, err := pool.Get()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer c2.Close()
 	t.Logf("pool stats: %s", pool.Stats())
 	t.Logf("pooled conn 2: %#v", c2)
 	if err := c1.Close(); err != nil {
 		t.Errorf("close c1: %v", err)
 	}
-	c3 := getConnection(t)
+	c3, err := p.Get()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer c3.Close()
 	t.Logf("pool stats: %s", pool.Stats())
 	t.Logf("pooled conn 3: %#v", c3)
 	if err := c2.Close(); err != nil {
@@ -120,14 +135,24 @@ func TestSmallGoPool(t *testing.T) {
 	}
 	defer pool.Close()
 
-	c1 := getConnection(t)
+	c1,err := pool.Get()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer c1.Close()
 	st := pool.Stats()
 	t.Logf("1. %s", st)
 	if st.InUse != 1 {
 		t.Errorf("awaited inUse=1, got %d", st.InUse)
 	}
 
-	c2 := getConnection(t)
+	c2, err := pool.Get()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer c2.Close()
 	st = pool.Stats()
 	t.Logf("2. %s", st)
 	if st.InUse != 2 {
@@ -156,7 +181,7 @@ func TestSmallGoPool(t *testing.T) {
 func TestSmallBoundedPool(t *testing.T) {
 	user, passw, sid := SplitDSN(*dsn)
 	var err error
-	pool, err = NewBoundedConnPool(user, passw, sid, 1, 1, 1*time.Second)
+	pool, err = NewBoundedConnPool(user, passw, sid, 1, 1*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

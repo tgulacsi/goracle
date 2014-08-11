@@ -180,37 +180,6 @@ func TestSplitDSN(t *testing.T) {
 	}
 }
 
-var pool ConnectionPool
-var conn *Connection
-
-func getConnection(t *testing.T) *Connection {
-	if pool == nil && conn.IsConnected() {
-		return conn
-	}
-	var err error
-	if pool != nil {
-		conn, err = pool.Get()
-		if err != nil {
-			log.Panicf("error getting connection from pool: %v", err)
-		}
-		return conn
-	}
-	if !(dsn != nil && *dsn != "") {
-		t.Logf("cannot test connection without dsn!")
-		return conn
-	}
-
-	user, passw, sid := SplitDSN(*dsn)
-	conn, err = NewConnection(user, passw, sid, false)
-	if err != nil {
-		log.Panicf("error creating connection to %s: %s", *dsn, err)
-	}
-	if err = conn.Connect(0, false); err != nil {
-		log.Panicf("error connecting: %s", err)
-	}
-	return conn
-}
-
 var alloc uint64
 var memkb int
 var memcmd []string
@@ -269,3 +238,35 @@ func TestReConnect(t *testing.T) {
 	}
 	gcMem()
 }
+
+var pool ConnectionPool
+var conn *Connection
+
+func getConnection(t *testing.T) *Connection {
+	if pool == nil && conn.IsConnected() {
+		return conn
+	}
+	var err error
+	if pool != nil {
+		conn, err = pool.Get()
+		if err != nil {
+			log.Panicf("error getting connection from pool: %v", err)
+		}
+		return conn
+	}
+	if !(dsn != nil && *dsn != "") {
+		t.Logf("cannot test connection without dsn!")
+		return conn
+	}
+
+	user, passw, sid := SplitDSN(*dsn)
+	conn, err = NewConnection(user, passw, sid, false)
+	if err != nil {
+		log.Panicf("error creating connection to %s: %s", *dsn, err)
+	}
+	if err = conn.Connect(0, false); err != nil {
+		log.Panicf("error connecting: %s", err)
+	}
+	return conn
+}
+

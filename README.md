@@ -38,10 +38,7 @@ PL/SQL associative tables...) then goracle/oracle is the straight choice.
 For simple (connection, Ping, Select) usage, and testing connection
 (DSN can be tricky), see [conntest](conntest/main.go).
 
-# Changes #
-With b0219c8f we can reuse statements with different number of bind variables!
-
-# Debug #
+## Debug ##
 You can build the test executable (for debugging with gdb, for example) with
 `go test -c`
 
@@ -51,8 +48,7 @@ C functions.
 
 See [c](./c) for example.
 
-
-# Install #
+## Install ##
 It is `go get`'able  with `go get github.com/tgulacsi/goracle/godrv`
 iff you have
 [Oracle DB](http://www.oracle.com/technetwork/database/enterprise-edition/index.html) installed
@@ -63,7 +59,7 @@ OR the Oracle's
 
 For environment variables, you can try [env](./env)
 
-## Linux ##
+### Linux ###
 AND you have set proper environment variables:
 
     export CGO_CFLAGS=-I$(dirname $(find $ORACLE_HOME -type f -name oci.h))
@@ -81,7 +77,7 @@ With InstantClient:
     CGO_CFLAGS=-I/usr/include/oracle/11.2/client64
     CGO_LDFLAGS=-L/usr/include/oracle/11.2/client64
 
-## Mac OS X ##
+### Mac OS X ###
 For Mac OS X I did the following:
 
 You have to get both the Instant Client Package Basic and the Instant Client Package SDK (for the header files).
@@ -98,9 +94,9 @@ Perhaps this export would work too, but I did not try it.  I understand this is 
 
 The DYLD vars are needed to run the binary, not to compile it.
 
-## Windows 7 64-bit ##
+### Windows 7 64-bit ###
 Thanks to Johann Kropf!
-### Requirements ###
+#### Requirements ####
   * mingw-w64
   * msys
   * go
@@ -135,3 +131,19 @@ Build oracle with
 `%GOPATH%\github.com\tgulacsi\goracle\oracle>go install`
 
 You can build now your program which imports "github.com/tgulacsi/goracle/oracle"!
+
+# Changes #
+With b0219c8f we can reuse statements with different number of bind variables!
+
+# Helpers #
+## Pool ##
+There are several connection pool implementations in [goracle/oracle](oracle/pool.go):
+
+1. `GoConnectionPool`: simple leaky buffer-based connection cache.
+
+1. `BoundedConnPool`: vitess/pools -based bounded connection pool.
+
+1. `ORAConnectionPool`: uses the OCIConnectionPool
+
+1. `ORASessionPool`: uses the OCISessionPool. Has problems.
+

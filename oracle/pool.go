@@ -65,6 +65,8 @@ type vitessPool struct {
 	putCh     chan *Connection
 	closeCh   chan struct{}
 	timeout   time.Duration
+	stats     Statistics
+	wg        sync.WaitGroup
 	closedMtx sync.Mutex
 	closed    bool
 }
@@ -73,7 +75,10 @@ type vitessConn struct {
 }
 
 func (vc vitessConn) Close() {
-	_ = vc.conn.close()
+	vc.conn.srvMtx.Lock()
+	vc.conn.connectionPool = nil
+	vc.conn.srvMtx.Unlock()
+	_ = vc.conn.Close()
 }
 
 type maybeConn struct {
@@ -82,8 +87,10 @@ type maybeConn struct {
 }
 
 // NewBoundedConnPool returns a new bounded connection pool. It is based on vitess/pools.
-func NewBoundedConnPool(username, password, sid string, connMin, connMax int, timeout time.Duration) (ConnectionPool, error) {
-	pool := &vitessPool{timeout: timeout}
+//
+// If connMax < 0 then it will web 999.
+func NewBoundedConnPool(username, password, sid string, connMax int, timeout time.Duration) (ConnectionPool, error) {
+	pool := &vitessPool{timeout: timeout, stats: Statistics{PoolCap: uint32(connMax)}}
 	var factory = pools.Factory(func() (pools.Resource, error) {
 		c, err := NewConnection(username, password, sid, false)
 		if err != nil {
@@ -92,13 +99,10 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 		c.connectionPool = pool
 		return vitessConn{c}, err
 	})
-	if connMin < 0 {
-		connMin = 1
+	if connMax < 1 {
+		connMax = 999
 	}
-	if connMax < connMin {
-		connMax = connMin
-	}
-	rp := pools.NewResourcePool(factory, connMin, connMax, IdleTimeout)
+	rp := pools.NewResourcePool(factory, connMax, connMax, IdleTimeout) // !! connMax !!
 	pool.ResourcePool = rp
 	if timeout > 0 {
 		pool.getCh = make(chan maybeConn)
@@ -106,8 +110,10 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 		pool.closeCh = make(chan struct{})
 
 		// GET
+		pool.wg.Add(1)
 		go func() {
-		Loop:
+			defer pool.wg.Done()
+			defer close(pool.getCh)
 			for {
 				res, err := rp.Get()
 				var c *Connection
@@ -118,36 +124,39 @@ func NewBoundedConnPool(username, password, sid string, connMin, connMax int, ti
 				// see http://dave.cheney.net/2014/03/19/channel-axioms
 				select {
 				case <-pool.closeCh:
-					close(pool.putCh)
 					if c != nil {
-						c.close()
+						c.connectionPool = nil
+						c.Close()
 					}
-					break Loop
+					return
 				case pool.getCh <- maybeConn{c, err}:
 				}
 			}
 		}()
 
 		// PUT
+		pool.wg.Add(1)
 		go func() {
-		Loop:
+			defer pool.wg.Done()
 			for {
 				select {
 				case <-pool.closeCh:
-					close(pool.getCh)
-					break Loop
+					return
 				case c := <-pool.putCh:
-					func(c *Connection) {
+					var vc pools.Resource
+					if c != nil {
+					c.srvMtx.Lock()
+					c.connectionPool = nil
+					c.srvMtx.Unlock()
+					if c.IsConnected() {
+						vc = vitessConn{c}
+					}}
+					func(vc pools.Resource) {
 						defer func() {
 							recover()
 						}()
-						if !c.IsConnected() {
-							rp.Put(nil)
-						} else {
-							c.connectionPool = nil
-							rp.Put(vitessConn{c})
-						}
-					}(c)
+						rp.Put(nil)
+					}(vc)
 				}
 			}
 		}()
@@ -182,7 +191,9 @@ func (p *vitessPool) Close() error {
 	}()
 	p.closedMtx.Lock()
 	if !p.closed {
+		close(p.putCh)
 		go func() {
+			defer close(p.closeCh)
 			for i := 0; i < 2; i++ {
 				p.closeCh <- struct{}{}
 			}
@@ -190,13 +201,16 @@ func (p *vitessPool) Close() error {
 		p.closed = true
 	}
 	p.closedMtx.Unlock()
+	p.wg.Wait()
 	return nil
 }
 
 func (p *vitessPool) Get() (*Connection, error) {
+	add(&p.stats.InUse, 1, &p.stats.MaxUse)
 	if p.getCh != nil {
 		select {
 		case mc := <-p.getCh:
+			atomic.AddUint32(&p.stats.InIdle, ^uint32(0)) // decrement
 			return mc.conn, mc.err
 		case <-time.After(p.timeout):
 			return nil, ErrPoolTimeout
@@ -207,16 +221,21 @@ func (p *vitessPool) Get() (*Connection, error) {
 	if err != nil {
 		return nil, err
 	}
+	atomic.AddUint32(&p.stats.InIdle, ^uint32(0)) // decrement
 	return res.(vitessConn).conn, nil
 }
 
 func (p *vitessPool) Put(conn *Connection) {
+	atomic.AddUint32(&p.stats.InUse, ^uint32(0)) // decremenet
 	if p.putCh != nil {
 		select {
 		case p.putCh <- conn:
+			add(&p.stats.InIdle, 1, &p.stats.MaxIdle)
 			return
 		case <-time.After(p.timeout):
-			conn.close()
+			atomic.AddUint32(&p.stats.PoolTooSmall, 1)
+			conn.connectionPool = nil
+			conn.Close()
 			return
 		}
 	}
@@ -225,7 +244,10 @@ func (p *vitessPool) Put(conn *Connection) {
 }
 
 func (p *vitessPool) Stats() Statistics {
-	return Statistics{InIdle: uint32(p.ResourcePool.Capacity()), PoolCap: uint32(p.ResourcePool.MaxCap())}
+	stats := p.stats
+	stats.InIdle = uint32(p.ResourcePool.Capacity())
+	return stats
+	//return Statistics{InIdle: uint32(p.ResourcePool.Capacity()), PoolCap: uint32(p.ResourcePool.MaxCap())}
 }
 
 // Statistics is a collection of pool usage metrics.
@@ -299,7 +321,8 @@ func (cp *goConnectionPool) Put(conn *Connection) {
 		// in chan
 	default:
 		atomic.AddUint32(&cp.stats.PoolTooSmall, 1)
-		conn.close()
+		conn.connectionPool = nil
+		conn.Close()
 	}
 }
 
@@ -309,7 +332,8 @@ func (cp *goConnectionPool) Close() error {
 	}
 	close(cp.pool)
 	for c := range cp.pool {
-		c.close()
+		c.connectionPool = nil
+		c.Close()
 	}
 	cp.pool = nil
 	return nil
@@ -332,6 +356,9 @@ type oraConnectionPool struct {
 }
 
 // NewORAConnectionPool returns a new connection pool wrapping an OCI Connection Pool.
+//
+// It seems that it does not treat connMax as a hard upper bound! Although the number of
+// actual physical connections (TCP sockets in use) IS bounded.
 func NewORAConnectionPool(username, password, dblink string, connMin, connMax, connIncr int) (ConnectionPool, error) {
 	env, err := NewEnvironment()
 	if err != nil {
@@ -480,7 +507,7 @@ func (cp *oraConnectionPool) Put(conn *Connection) {
 	if err != nil {
 		log.Printf("SessionRelease ERROR: %v", err)
 		conn.connectionPool = nil
-		conn.close()
+		conn.Close()
 		conn.handle = nil
 	}
 	return
@@ -505,6 +532,8 @@ type oraSessionPool struct {
 
 // NewORASessionPool returns a new session pool wrapping an OCI Session Pool.
 // - http://docs.oracle.com/cd/E11882_01/appdev.112/e10646/oci16rel001.htm#LNOCI17124
+//
+// NOT WORKING ATM.
 func NewORASessionPool(username, password, dblink string, connMin, connMax, connIncr int, homogeneous bool) (ConnectionPool, error) {
 	env, err := NewEnvironment()
 	if err != nil {
@@ -548,8 +577,8 @@ func NewORASessionPool(username, password, dblink string, connMin, connMax, conn
 		}
 	}
 
-	//mode := C.ub4(C.OCI_DEFAULT | C.OCI_SPC_STMTCACHE) // STMTCACHE -> garble
-	mode := C.ub4(C.OCI_DEFAULT)
+	mode := C.ub4(C.OCI_DEFAULT | C.OCI_SPC_STMTCACHE) // STMTCACHE -> garble
+	//mode := C.ub4(C.OCI_DEFAULT)
 	if homogeneous {
 		mode |= C.OCI_SPC_HOMOGENEOUS
 	}
@@ -670,7 +699,7 @@ func (cp *oraSessionPool) Put(conn *Connection) {
 	if err != nil {
 		log.Printf("SessionRelease ERROR: %v", err)
 		conn.connectionPool = nil
-		conn.close()
+		conn.Close()
 		conn.handle = nil
 	}
 	return
