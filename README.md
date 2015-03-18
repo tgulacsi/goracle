@@ -61,7 +61,12 @@ OR the Oracle's
 *both* the Basic Client and the SDK (for the header files), too!
 - installed
 
-For environment variables, you can try [env](./env)
+For environment variables on POSIXy systems, you can try [. ./env](./env):
+
+    go get github.com/tgulacsi/goracle
+    cd $GOPATH/src/github.com/tgulacsi/goracle
+    . ./env
+    go install ./godrv
 
 ## Linux ##
 AND you have set proper environment variables:
