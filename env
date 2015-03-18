@@ -1,7 +1,4 @@
 #!/bin/sh
-if [ -n "$CGO_CFLAGS" ] || [ -n "$CGO_LDFLAGS" ]; then
-    return
-fi
 cdir=
 ldir=
 if [ -z "$ORACLE_HOME" ]; then
@@ -10,7 +7,13 @@ if [ -z "$ORACLE_HOME" ]; then
     if [ -n "$nm" ]; then
         . $nm
     fi
+	echo "export ORACLE_HOME=$ORACLE_HOME"
 fi
+if [ -n "$CGO_CFLAGS" ] || [ -n "$CGO_LDFLAGS" ]; then
+	echo "CGO_CFLAGS and CGO_LDFLAGS already set"
+    return
+fi
+
 for bdn in /usr/include $ORACLE_HOME; do
     cdir=$(find $bdn -type f -name oci.h 2>/dev/null | head -n1)
     if [ -n "$cdir" ]; then
@@ -29,6 +32,5 @@ echo "cdir=$cdir ldir=$ldir"
 export CGO_CFLAGS=-I$cdir
 export CGO_LDFLAGS=-L$ldir
 
-echo "export ORACLE_HOME=$ORACLE_HOME"
 echo "export CGO_CFLAGS=$CGO_CFLAGS"
 echo "export CGO_LDFLAGS=$CGO_LDFLAGS"
