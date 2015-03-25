@@ -1,3 +1,25 @@
+# WARNING #
+
+This repo is frozen, all future modifications will happen in
+
+    github.com/go-goracle/goracle
+
+This is for `gopkg.in` versioning, so you can use
+
+	gopkg.in/goracle.v1
+
+for imports! Reasons for this change:
+
+  1. Nicer import path,
+  1. Versioned imports - braking changes will go into a new branch,
+     appearing as a new version: `gopkg.in/goracle.v2`
+  1. I've created a new GitHub organization, and the import path
+     no longer contains my name, so the transition of ownership
+	 may be easier in the future, if someone with better skills,
+	 more time appear to maintain goracle.
+
+
+
 # goracle #
 *goracle/oracle* is a package is a translated version of
 [cx_Oracle](http://cx-oracle.sourceforge.net/html/index.html)
