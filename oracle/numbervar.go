@@ -145,7 +145,7 @@ func numberVarformatForString(text string) string {
 	rational := false
 	i := 0
 	if text[i] == '-' {
-		format[0] = '-'
+		format[0] = 'S'
 		i++
 	}
 	for ; i < len(text); i++ {
